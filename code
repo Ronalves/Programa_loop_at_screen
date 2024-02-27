@@ -1,0 +1,3405 @@
+*======================================================================*
+* Programa      : ZRFI963
+* Título        : Centralização Débitos Automáticos
+* Autor         : Z221452
+* Data Criação  : 12/01/2024
+* Especificação : FI - Sivaldo
+*----------------------------------------------------------------------*
+* Descrição do Processo:
+*
+*----------------------------------------------------------------------*
+* Alterações :
+* Data          Responsável       Identificação   Descrição
+*
+*======================================================================*
+REPORT  zrfi966 MESSAGE-ID zb
+NO STANDARD PAGE HEADING
+                 LINE-SIZE 190
+                 LINE-COUNT 78.
+
+TYPE-POOLS :vrm.
+
+***********
+**Tabelas**
+***********
+TABLES:ztbfi144.
+
+*********
+**Types**
+*********
+TYPES:BEGIN OF ty_ztbfi839,
+       lifnr            TYPE ztbfi839-lifnr,
+       bukrs            TYPE ztbfi839-bukrs,
+       registro_inativo TYPE ztbfi839-registro_inativo,
+       descricao        TYPE ztbfi839-descricao,
+       kostl            TYPE ztbfi839-kostl,
+       ordem            TYPE ztbfi839-ordem,
+       bupla            TYPE ztbfi839-bupla,
+       tipo             TYPE ztbfi839-tipo,
+       cod_debt_aut     TYPE ztbfi839-cod_debt_aut,
+       deb_automa       TYPE ztbfi839-deb_automa,
+      END OF ty_ztbfi839.
+
+TYPES:BEGIN OF ty_ztbfi839t,
+       bukrs            TYPE ztbfi839-bukrs,
+       registro_inativo TYPE ztbfi839-registro_inativo,
+       bupla            TYPE ztbfi839-bupla,
+       kostl            TYPE ztbfi839-kostl,
+       lifnr            TYPE ztbfi839-lifnr,
+       stcd1            TYPE ztbfi839-stcd1,
+       cod_debt_aut     TYPE ztbfi839-cod_debt_aut,
+       deb_automa       TYPE ztbfi839-deb_automa,
+       ordem            TYPE ztbfi839-ordem,
+      END OF ty_ztbfi839t.
+
+TYPES:BEGIN OF ty_bdcdata,
+       program      TYPE bdcdata-program,  " Pool de módulos BDC
+       dynpro       TYPE bdcdata-dynpro,   " NÚmero de tela BDC
+       dynbegin     TYPE bdcdata-dynbegin, " Início BDC de uma tela
+       fnam         TYPE bdcdata-fnam,     " Nome do campo
+       fval         TYPE bdcdata-fval,     " Valor do campo BDC
+END OF ty_bdcdata.
+
+TYPES:BEGIN OF ty_final,
+       msgtyp    TYPE icon_d,
+       belnr     TYPE belnr_d,
+       bukrs     TYPE bukrs,
+       gjahr     TYPE gjahr,
+       protocolo TYPE zprot,
+       message   TYPE camsg,
+END OF ty_final.
+
+***********
+**Tabelas**
+***********
+DATA:tg_bdcdata      TYPE TABLE OF ty_bdcdata,
+     tg_list         TYPE vrm_values,
+     tg_msg          TYPE TABLE OF bdcmsgcoll WITH HEADER LINE,
+     tg_final        TYPE TABLE OF ty_final,
+     tg_alv_fieldcat TYPE slis_t_fieldcat_alv,
+     tg_sort         TYPE TABLE OF slis_sortinfo_alv,
+     tg_ztbmm855     TYPE TABLE OF ztbmm855,
+     tg_erros        TYPE tpit_t_errdoc,
+     wg_erros        LIKE LINE OF tg_erros,
+     tg_buztab       TYPE tpit_t_buztab,
+     tg_fldtab       TYPE tpit_t_fname.
+
+*************
+**Estruturas*
+*************
+DATA:wg_ztbfi839       TYPE ty_ztbfi839,
+     wg_ztbfi839t      TYPE ty_ztbfi839t,
+     wg_bdcdata        TYPE ty_bdcdata,
+     wg_list           LIKE LINE OF tg_list,
+     wg_msg            TYPE bdcmsgcoll,
+     wg_final          TYPE ty_final,
+     wg_disvariant     TYPE disvariant,
+     wg_tb_ztbmm706    TYPE ztbmm706,
+     wg_bseg           TYPE bseg,
+     wg_alv_fieldcat   LIKE LINE OF tg_alv_fieldcat,
+     wg_fldtab         LIKE LINE OF tg_fldtab.
+
+*************
+**Variáveis**
+*************
+DATA:vg_error        TYPE abap_bool,
+     vg_blart        TYPE bkpf-blart,
+     vg_wrbtr(10)    TYPE c,
+     vg_wrbtr_a(10)  TYPE c,
+     vg_wrbtr_e(10)  TYPE c,
+     vg_wrbtr_j(10)  TYPE c,
+     vg_wrbtr_m(10)  TYPE c,
+     vg_wrbtr_o(10)  TYPE c,
+     vg_nfval_t(10)  TYPE c,
+     vg_menge(10)    TYPE c,
+     vg_sgtxt        TYPE invfo-sgtxt,
+     vg_mode(1)      TYPE c VALUE 'N',
+     vg_s            TYPE c VALUE 'S',
+     vg_msgno        TYPE sy-msgno,
+     vg_messg        TYPE message,
+     vg_layout       TYPE slis_layout_alv,
+     vg_hkont        TYPE invfo-hkont,
+     vg_706_bankl    TYPE bnka-bankl,
+     vg_barcode      TYPE i,
+     vg_706_barra    TYPE ztbmm706-barcode,
+     vg_706_belnr    TYPE ztbmm706-belnr,
+     vg_706_comp     TYPE ztbmm706-comp_code,
+     vg_706_gjahr    TYPE ztbmm706-gjahr,
+     vg_706_buzei    TYPE bsik-buzei,
+     vg_706_docnum   TYPE ztbmm706-docnum,
+     vg_barcode44    TYPE ztbfi144-barcode44,
+     vg_conta        TYPE acgl_item-hkont,
+     vg_conta_outros TYPE acgl_item-hkont,
+     vg_g            TYPE acgl_item-hkont,
+     vg_c            TYPE acgl_item-hkont,
+     vg_a            TYPE acgl_item-hkont,
+     vg_o            TYPE acgl_item-hkont,
+     vg_not_found    TYPE c,
+     vg_conta_multa  TYPE acgl_item-hkont,
+     vg_conta_juros  TYPE acgl_item-hkont,
+     vg_kostl_multa  TYPE kostl,
+     vg_7000(4)      TYPE c,
+     vg_tcode        TYPE tcode.
+
+**************
+**Constantes**
+**************
+CONSTANTS:c_1(1)                    TYPE c VALUE '1',
+          c_2(1)                    TYPE c VALUE '2',
+          c_3(1)                    TYPE c VALUE '3',
+          c_agua(4)                 TYPE c VALUE 'Água',
+          c_esgoto(6)               TYPE c VALUE 'Esgoto',
+          c_agesgoto(11)            TYPE c VALUE 'Agua Esgoto',
+          c_tpdesp(8)               TYPE c VALUE 'P_TPDESP',
+          c_tplig(7)                TYPE c VALUE  'P_TPLIG',
+          c_tt(2)                   TYPE c VALUE 'TT',
+          c_aa(2)                   TYPE c VALUE 'AA',
+          c_0(1)                    TYPE c VALUE '0',
+          c_codb2(7)                TYPE c VALUE 'P_CODB2',
+          c_zlsch(7)                TYPE c VALUE 'P_ZLSCH',
+          c_e(1)                    TYPE c VALUE 'E',
+          c_conce(7)                TYPE c VALUE 'P_CONCE',
+          c_bukrs(7)                TYPE c VALUE 'P_BUKRS',
+          c_kostl(8)                TYPE c VALUE 'P_KOSTL',
+          c_aufnr(7)                TYPE c VALUE 'P_AUFNR',
+          c_bupla(7)                TYPE c VALUE 'P_BUPLA',
+          c_ident(7)                TYPE c VALUE 'P_IDENT',
+          c_codbeb(9)               TYPE c VALUE 'P_CODBEB',
+          c_debaut(8)               TYPE c VALUE 'P_DEBAUT',
+          c_debau2(8)               TYPE c VALUE 'P_DEBAU2',
+          c_aufnr2(8)               TYPE c VALUE 'P_AUFNR2',
+          c_codb(6)                 TYPE c VALUE 'P_CODB',
+          c_frmpg(7)                TYPE c VALUE 'P_FRMPG',
+          c_pagua(6)                TYPE c VALUE 'P_AGUA',
+          c_pesgoto(8)              TYPE c VALUE 'P_ESGOTO',
+          c_poutros(8)              TYPE c VALUE 'P_OUTROS',
+          c_pstcd1(7)               TYPE c VALUE 'P_STCD1',
+          c_pdebito(8)              TYPE c VALUE 'P_DEBITO',
+          c_icmse2(8)               TYPE c VALUE 'P_ICMSE2',
+          c_icms2a(8)               TYPE c VALUE 'P_ICMS2A',
+          c_cicms2(8)               TYPE c VALUE 'P_CICMS2',
+          c_dicms2(8)               TYPE c VALUE 'P_DICMS2',
+          c_bukrs2(8)               TYPE c VALUE 'P_BUKRS2',
+          c_bupla2(8)               TYPE c VALUE 'P_BUPLA2',
+          c_kostl2(8)               TYPE c VALUE 'P_KOSTL2',
+          c_lifnr2(8)               TYPE c VALUE 'P_LIFNR2',
+          c_stcd1(7)                TYPE c VALUE 'P_STCD1',
+          c_debito(8)               TYPE c VALUE 'P_DEBITO',
+          c_valtot(8)               TYPE c VALUE 'P_VALTOT',
+          c_wrbtr(7)                TYPE c VALUE 'P_WRBTR',
+          c_l6(2)                   TYPE c VALUE 'L6',
+          c_l9(2)                   TYPE c VALUE 'L9',
+          c_fat(3)                  TYPE c VALUE 'FAT',
+          c_hifen(1)                TYPE c VALUE '-',
+          c_w(1)                    TYPE c VALUE 'W',
+          c_s(1)                    TYPE c VALUE 'S',
+          c_erro(4)                 TYPE c VALUE '@1B@',
+          c_aviso(4)                TYPE c VALUE '@AH@',
+          c_ok(4)                   TYPE c VALUE '@0V@',
+          c_a1(1)                   TYPE c VALUE 'A',
+          c_i(1)                    TYPE c VALUE 'I',
+          c_standard_fullscreen(19) TYPE c VALUE 'STANDARD_FULLSCREEN',
+          c_pais(2)                 TYPE c VALUE 'BR',
+          c_r(1)                    TYPE c VALUE 'R',
+          c_barcode(2)              TYPE c VALUE '47',
+          c_barcod(2)               TYPE c VALUE '48',
+          c_312(3)                  TYPE c VALUE '312',
+          c_br01(4)                 TYPE c VALUE 'BR01',
+          c_19000101(8)             TYPE c VALUE '19000101',
+          c_99991231(8)             TYPE c VALUE '99991231',
+          c_g(1)                    TYPE c VALUE 'G',
+          c_c(1)                    TYPE c VALUE 'C',
+          c_a(1)                    TYPE c VALUE 'A',
+          c_o(1)                    TYPE c VALUE 'O',
+          c_5132332010(10)          TYPE c VALUE '5132332010',
+          c_6112332010(10)          TYPE c VALUE '6112332010',
+          c_6132332010(10)          TYPE c VALUE '6132332010',
+          c_6122332010(10)          TYPE c VALUE '6122332010',
+          c_z_ztfi838_multa(15)     TYPE c VALUE 'Z_ZTFI838_MULTA',
+          c_z_ztfi838_juros(15)     TYPE c VALUE 'Z_ZTFI838_JUROS',
+          c_z_ztfi838_multa_4ul(22) TYPE c VALUE 'Z_ZTFI838_MULTA_4ULTCC',
+          c_k(1)                    TYPE c VALUE 'K',
+          c_xref3(5)                TYPE c VALUE 'XREF3',
+          c_zlspr(5)                TYPE c VALUE 'ZLSPR',
+          c_ic1(4)                  TYPE c VALUE '&IC1',
+          c_belnr(5)                TYPE c VALUE 'BELNR',
+          c_z_ztfi838(10)           TYPE c VALUE 'Z_ZTFI838_',
+          c_csp(3)                  TYPE c VALUE 'CSP',
+          c_dco(3)                  TYPE c VALUE 'DCO',
+          c_dga(3)                  TYPE c VALUE 'DGA',
+          c_dop(3)                  TYPE c VALUE 'DOP',
+          c_z_ztfi838_outros(16)    TYPE c VALUE 'Z_ZTFI838_OUTROS',
+          c_mz(2)                   TYPE c VALUE 'MZ',
+          c_crp_mist(8)             TYPE c VALUE 'CRP_MIST',
+          c_percent(1)              TYPE c VALUE '%',
+          c_298(3)                  TYPE c VALUE '298',
+          c_055(3)                  TYPE c VALUE '055'.
+
+*****************
+**Field Symbols**
+*****************
+FIELD-SYMBOLS:<fs_buztab> LIKE LINE OF tg_buztab,
+              <fl_final>  TYPE ty_final.
+
+SELECTION-SCREEN BEGIN OF BLOCK a1 WITH FRAME TITLE text-000.
+*Tipo de Despesa
+PARAMETERS: p_tpdesp AS LISTBOX VISIBLE LENGTH 14 USER-COMMAND abc.
+SELECTION-SCREEN END OF BLOCK a1.
+
+SELECTION-SCREEN: BEGIN OF BLOCK b1 WITH FRAME.
+SELECTION-SCREEN: BEGIN OF LINE.
+*Lançamento de Nota Fiscal de Concessionárias
+SELECTION-SCREEN: COMMENT 15(48) text-t01.
+SELECTION-SCREEN: END OF LINE.
+SELECTION-SCREEN: END OF BLOCK b1.
+
+*Água
+SELECTION-SCREEN: BEGIN OF BLOCK b2 WITH FRAME TITLE text-d01.
+SELECTION-SCREEN: BEGIN OF LINE.
+*Chave de acesso
+SELECTION-SCREEN: COMMENT 1(18) text-002 FOR FIELD p_chave MODIF ID aa.
+PARAMETERS:p_chave TYPE zdechave_acesso MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*UC / RGI / Outros
+SELECTION-SCREEN: COMMENT 1(18) text-003 FOR FIELD p_uc MODIF ID aa.
+PARAMETERS:p_uc TYPE zdeuc MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+SKIP.
+SELECTION-SCREEN: BEGIN OF LINE.
+*Concessionária
+SELECTION-SCREEN: COMMENT 1(18) text-004 FOR FIELD p_conce MODIF ID aa.
+PARAMETERS:p_conce TYPE zdeconce MODIF ID aa.
+*Data de Emissão
+SELECTION-SCREEN: POSITION 57.
+SELECTION-SCREEN: COMMENT 57(15) text-005 FOR FIELD p_dtemis MODIF ID aa.
+PARAMETERS:p_dtemis TYPE zdedtemiss MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Ident. de Site
+SELECTION-SCREEN: COMMENT 1(18) text-006 FOR FIELD p_ident MODIF ID aa.
+PARAMETERS:p_ident TYPE ztiposite2 MODIF ID aa VISIBLE LENGTH 15.
+*Empresa
+SELECTION-SCREEN: POSITION 57.
+SELECTION-SCREEN: COMMENT 57(15) text-007 FOR FIELD p_bukrs MODIF ID aa.
+PARAMETERS:p_bukrs TYPE bukrs MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Centro de custo
+SELECTION-SCREEN: COMMENT 1(18) text-008 FOR FIELD p_kostl MODIF ID aa.
+PARAMETERS:p_kostl TYPE kostl MODIF ID aa VISIBLE LENGTH 15.
+*Nº ordem
+SELECTION-SCREEN: POSITION 32.
+SELECTION-SCREEN: COMMENT 32(10) text-009 FOR FIELD p_aufnr MODIF ID aa.
+PARAMETERS:p_aufnr TYPE aufnr MODIF ID aa.
+*Filial
+SELECTION-SCREEN: POSITION 57.
+SELECTION-SCREEN: COMMENT 57(15) text-010 FOR FIELD p_bupla MODIF ID aa.
+PARAMETERS:p_bupla TYPE bupla MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Nota_Fiscal
+SELECTION-SCREEN: COMMENT 1(18) text-011 FOR FIELD p_notafi MODIF ID aa.
+PARAMETERS:p_notafi TYPE zenota_fiscal MODIF ID aa VISIBLE LENGTH 15.
+*Número Fatura
+SELECTION-SCREEN: POSITION 32.
+*Serie
+PARAMETERS: p_serix2 LIKE j_1bnfdoc-series MODIF ID aa.
+
+SELECTION-SCREEN: COMMENT 51(15) text-012 FOR FIELD p_numfat MODIF ID aa.
+PARAMETERS:p_numfat TYPE zdenumfat MODIF ID aa.
+*Serie
+PARAMETERS: p_serie2 LIKE j_1bnfdoc-series MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Tipo de ligação
+SELECTION-SCREEN: COMMENT 1(18) text-013 FOR FIELD p_tplig MODIF ID aa.
+PARAMETERS: p_tplig AS LISTBOX VISIBLE LENGTH 14 USER-COMMAND lig MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Hidrometro
+SELECTION-SCREEN: COMMENT 1(18) text-014 FOR FIELD p_hidro MODIF ID aa.
+PARAMETERS: p_hidro TYPE zdehidrometro MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Discriminação faturamento
+SELECTION-SCREEN: COMMENT 1(26) text-015 MODIF ID aa.
+*Água
+SELECTION-SCREEN: COMMENT 27(5) text-016 FOR FIELD p_agua MODIF ID aa.
+PARAMETERS: p_agua TYPE zdeagua MODIF ID aa.
+*Esgoto
+SELECTION-SCREEN: COMMENT 53(6) text-017 FOR FIELD p_esgoto MODIF ID aa.
+PARAMETERS: p_esgoto TYPE zdeesgoto MODIF ID aa.
+*Outros
+SELECTION-SCREEN: COMMENT 79(6) text-018 FOR FIELD p_outros MODIF ID aa.
+PARAMETERS: p_outros TYPE zdeoutros MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: SKIP.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Valor Total a Pagar
+SELECTION-SCREEN: COMMENT 1(18) text-019 FOR FIELD p_valtot MODIF ID aa.
+PARAMETERS:p_valtot TYPE zdevaltot MODIF ID aa VISIBLE LENGTH 15.
+*Data vencimento
+SELECTION-SCREEN: POSITION 32.
+SELECTION-SCREEN: COMMENT 40(15) text-020 FOR FIELD p_dtvenc MODIF ID aa.
+PARAMETERS:p_dtvenc TYPE zdedtvenc2 MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Total Nota Fiscal
+SELECTION-SCREEN: COMMENT 1(18) text-025 FOR FIELD p_totnf MODIF ID aa.
+PARAMETERS: p_totnf TYPE zde_total_nota_fiscal MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+*SELECTION-SCREEN: BEGIN OF LINE.
+***Montante Base
+**SELECTION-SCREEN: COMMENT 1(18) text-026 FOR FIELD p_montb MODIF ID aa.
+**PARAMETERS: p_montb TYPE zde_montante_base MODIF ID aa.
+**Crédito de ICMS
+*SELECTION-SCREEN: COMMENT 1(15) text-027 MODIF ID aa.
+**Sim
+*SELECTION-SCREEN: COMMENT 16(5) text-028 FOR FIELD p_sim MODIF ID aa.
+*PARAMETERS: p_sim RADIOBUTTON GROUP rad1 DEFAULT 'X'
+*USER-COMMAND rad1 MODIF ID aa.
+*SELECTION-SCREEN: END OF LINE.
+*
+*SELECTION-SCREEN: BEGIN OF LINE.
+**Não
+*SELECTION-SCREEN: COMMENT 16(5) text-029 FOR FIELD p_nao MODIF ID aa.
+*PARAMETERS: p_nao RADIOBUTTON GROUP rad1 MODIF ID aa.
+*SELECTION-SCREEN: END OF LINE.
+**
+
+SELECTION-SCREEN: BEGIN OF LINE.
+**Alíquota ICMS
+*SELECTION-SCREEN: COMMENT 1(18) text-030 FOR FIELD p_alicms MODIF ID aa.
+*PARAMETERS: p_alicms TYPE zde_aliquota_icms MODIF ID aa.
+*Código de débito automático
+SELECTION-SCREEN: COMMENT 1(30) text-031 FOR FIELD p_codbeb MODIF ID aa.
+PARAMETERS: p_codbeb TYPE zdebautc MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+**Valor ICMS
+*SELECTION-SCREEN: COMMENT 1(18) text-032 FOR FIELD p_vlicms MODIF ID aa.
+*PARAMETERS: p_vlicms TYPE zde_aliquota_icms MODIF ID aa.
+*Débito Automático
+SELECTION-SCREEN: COMMENT 1(30) text-033 FOR FIELD p_debaut MODIF ID aa.
+PARAMETERS: p_debaut AS CHECKBOX MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Txt.cab.doc
+SELECTION-SCREEN: COMMENT 1(18) text-034 FOR FIELD p_txtca MODIF ID aa.
+PARAMETERS: p_txtca TYPE zde_txt_cab_doc MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Forma de Pagamento
+SELECTION-SCREEN: COMMENT 1(18) text-035 FOR FIELD p_frmpg MODIF ID aa.
+PARAMETERS: p_frmpg LIKE bseg-zlsch MODIF ID aa MATCHCODE OBJECT zsh_t042z.
+*Código de Barras
+SELECTION-SCREEN: COMMENT 40(27) text-036 FOR FIELD p_codb MODIF ID aa.
+PARAMETERS: p_codb TYPE zde_codigo_barras MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: SKIP.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*PIS/PASEP e COFINS
+SELECTION-SCREEN: COMMENT 1(19) text-021 MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Alíquota(%)
+SELECTION-SCREEN: COMMENT 1(18) text-022 FOR FIELD p_aliq MODIF ID aa.
+PARAMETERS: p_aliq TYPE zde_aliquota2 MODIF ID aa.
+*Base Cálculo
+SELECTION-SCREEN: COMMENT 40(15) text-023 FOR FIELD p_basec MODIF ID aa.
+PARAMETERS: p_basec TYPE zde_base_calculo MODIF ID aa.
+*Valor
+SELECTION-SCREEN: COMMENT 79(6) text-024 FOR FIELD p_valor MODIF ID aa.
+PARAMETERS: p_valor TYPE zde_valor2 MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+*SELECTION-SCREEN: BEGIN OF LINE.
+**PIS/PASEP e COFINS
+*SELECTION-SCREEN: COMMENT 1(18) text-040 FOR FIELD p_ppcof MODIF ID aa.
+*PARAMETERS: p_ppcof TYPE zde_pis_pasep_cofins MODIF ID aa.
+**Alíquota2(%)
+*SELECTION-SCREEN: COMMENT 40(27) text-041 FOR FIELD p_aliq2 MODIF ID aa.
+*PARAMETERS: p_aliq2 TYPE zde_aliquota2 MODIF ID aa.
+*SELECTION-SCREEN: END OF LINE.
+*
+*SELECTION-SCREEN: BEGIN OF LINE.
+**Base Cálculo
+*SELECTION-SCREEN: COMMENT 1(18) text-042 FOR FIELD p_basec2 MODIF ID aa.
+*PARAMETERS: p_basec2 TYPE zde_base_calculo MODIF ID aa.
+**Valor
+*SELECTION-SCREEN: COMMENT 40(27) text-044 FOR FIELD p_valor2 MODIF ID aa.
+*PARAMETERS: p_valor2 TYPE zde_valor2 MODIF ID aa.
+*SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: SKIP.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Juros
+SELECTION-SCREEN: COMMENT 1(18) text-043 FOR FIELD p_juros MODIF ID aa.
+PARAMETERS: p_juros TYPE zde_juros2 MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Multa
+SELECTION-SCREEN: COMMENT 1(18) text-045 FOR FIELD p_multa MODIF ID aa.
+PARAMETERS: p_multa TYPE zde_multa MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: SKIP.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Consumo
+SELECTION-SCREEN: COMMENT 1(18) text-048 FOR FIELD p_consu MODIF ID aa.
+PARAMETERS: p_consu TYPE zde_consumo2 MODIF ID aa.
+*Período de Consumo
+SELECTION-SCREEN: COMMENT 40(27) text-049 FOR FIELD p_pconsu MODIF ID aa.
+PARAMETERS: p_pconsu TYPE zde_periodo_consumo MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: SKIP.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Tabela Tarifária
+SELECTION-SCREEN: COMMENT 1(18) text-050 FOR FIELD p_tabtaf MODIF ID aa.
+PARAMETERS: p_tabtaf TYPE zde_tabela_tarifaria MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+SELECTION-SCREEN: END OF BLOCK b2.
+
+SELECTION-SCREEN BEGIN OF BLOCK b3 WITH FRAME TITLE text-000.
+SELECTION-SCREEN: BEGIN OF LINE.
+*Mensagens Nota Fiscal
+SELECTION-SCREEN: COMMENT 1(21) text-051 MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Mensagem 01
+SELECTION-SCREEN: COMMENT 1(18) text-052 FOR FIELD p_msg01 MODIF ID aa.
+PARAMETERS: p_msg01 TYPE zde_mensagem_01 MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Mensagem 02
+SELECTION-SCREEN: COMMENT 1(18) text-053 FOR FIELD p_msg02 MODIF ID aa.
+PARAMETERS: p_msg02 TYPE zde_mensagem_02 MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Mensagem 03
+SELECTION-SCREEN: COMMENT 1(18) text-054 FOR FIELD p_msg03 MODIF ID aa.
+PARAMETERS: p_msg03 TYPE zde_mensagem_03 MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Mensagem 04
+SELECTION-SCREEN: COMMENT 1(18) text-055 FOR FIELD p_msg04 MODIF ID aa.
+PARAMETERS: p_msg04 TYPE zde_mensagem_04 MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: SKIP 2.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Campo Texto
+SELECTION-SCREEN: COMMENT 1(21) text-056 MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Campo Texto
+PARAMETERS: p_ctexto TYPE zde_campo_texto MODIF ID aa.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: END OF BLOCK b3.
+*----------------------------------------------------------------
+*Telefonia e outros
+SELECTION-SCREEN BEGIN OF BLOCK b4 WITH FRAME TITLE text-000.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-063 FOR FIELD p_uc MODIF ID tt.
+*N° controle
+PARAMETERS:p_uct TYPE zdeuc MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: SKIP 1.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-004 FOR FIELD p_lifnr2 MODIF ID tt.
+*Concessionária
+PARAMETERS: p_lifnr2 LIKE lfa1-lifnr MODIF ID tt.
+PARAMETERS: p_stcd1(18) TYPE c MODIF ID tt.
+SELECTION-SCREEN: POSITION 51.
+SELECTION-SCREEN: COMMENT 51(18) text-005 FOR FIELD p_bldat2 MODIF ID tt.
+*Data de Emissão
+PARAMETERS: p_bldat2 LIKE bkpf-bldat MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 51(18) text-007 FOR FIELD p_bukrs2 MODIF ID tt.
+*Empresa
+PARAMETERS: p_bukrs2 LIKE t001-bukrs MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-008 FOR FIELD p_kostl2 MODIF ID tt.
+*Centro de custo
+PARAMETERS: p_kostl2 LIKE cobl-kostl MODIF ID tt.
+SELECTION-SCREEN: POSITION 51.
+SELECTION-SCREEN: COMMENT 51(18) text-010 FOR FIELD p_bupla2 MODIF ID tt.
+*Filial
+PARAMETERS: p_bupla2 LIKE bseg-bupla MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-058 FOR FIELD p_xblnr MODIF ID tt.
+*Número Nota Fiscal
+PARAMETERS: p_xblnr LIKE j_1bnfdoc-nfenum MODIF ID tt.
+SELECTION-SCREEN: POSITION 29.
+*Serie
+PARAMETERS: p_seriex LIKE j_1bnfdoc-series MODIF ID tt.
+SELECTION-SCREEN: POSITION 51.
+SELECTION-SCREEN: COMMENT 51(15) text-059 FOR FIELD p_nfnum MODIF ID tt.
+*Número Fatura
+PARAMETERS: p_nfnum(9) TYPE c MODIF ID tt.
+SELECTION-SCREEN: POSITION 79.
+*Serie
+PARAMETERS: p_series LIKE j_1bnfdoc-series MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-019 FOR FIELD p_wrbtr MODIF ID tt.
+*Valor Total a Pagar
+PARAMETERS: p_wrbtr LIKE bseg-wrbtr MODIF ID tt.
+SELECTION-SCREEN: COMMENT 51(18) text-020 FOR FIELD p_zfbdt MODIF ID tt.
+*Data vencimento
+PARAMETERS: p_zfbdt LIKE bseg-zfbdt MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-025 FOR FIELD p_totnf2 MODIF ID tt.
+*Total Nota Fiscal
+PARAMETERS: p_totnf2 LIKE bseg-wrbtr MODIF ID tt.
+*N° Ordem
+SELECTION-SCREEN: COMMENT 51(18) text-009 FOR FIELD p_aufnr2 MODIF ID tt.
+PARAMETERS:p_aufnr2 TYPE aufnr MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-026 FOR FIELD p_base MODIF ID tt.
+*Montante Base
+PARAMETERS: p_base LIKE j_1bnfstx-base MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-030 FOR FIELD p_rate MODIF ID tt.
+*Alíquota ICMS
+PARAMETERS: p_rate LIKE j_1bnfstx-rate MODIF ID tt.
+SELECTION-SCREEN: COMMENT 51(22) text-031 FOR FIELD p_debito MODIF ID tt.
+SELECTION-SCREEN: POSITION 73.
+*Código de débito automático
+PARAMETERS: p_debito  LIKE ztbmm706-zdebaut MATCHCODE OBJECT zm24
+   MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-032 FOR FIELD p_taxval MODIF ID tt.
+*Valor ICMS
+PARAMETERS: p_taxval LIKE j_1bnfstx-taxval MODIF ID tt.
+*Débito Automático
+SELECTION-SCREEN: COMMENT 51(21) text-033 FOR FIELD p_debau2 MODIF ID tt.
+PARAMETERS: p_debau2 AS CHECKBOX MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-034 FOR FIELD p_bktxt MODIF ID tt.
+*Txt.cab.doc
+PARAMETERS: p_bktxt LIKE bkpf-bktxt MODIF ID tt.
+*Código de Barras
+SELECTION-SCREEN: COMMENT 51(21) text-036 FOR FIELD p_codb2 MODIF ID tt.
+PARAMETERS: p_codb2 TYPE zde_codigo_barras MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-035 FOR FIELD p_zlsch MODIF ID tt.
+*Forma de Pagamento
+PARAMETERS: p_zlsch LIKE bseg-zlsch MODIF ID tt MATCHCODE OBJECT zsh_t042z.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-062 FOR FIELD p_kwh MODIF ID tt.
+*Consumo
+PARAMETERS: p_kwh LIKE  bseg-menge MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-045 FOR FIELD s_multa MODIF ID tt.
+*Multas
+PARAMETERS s_multa TYPE j_1bnfstx-base MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+SELECTION-SCREEN: COMMENT 1(18) text-043 FOR FIELD s_juro MODIF ID tt.
+*Juros
+PARAMETERS s_juro TYPE j_1bnfstx-base MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+SELECTION-SCREEN: END OF BLOCK b4.
+
+SELECTION-SCREEN BEGIN OF BLOCK b5 WITH FRAME TITLE text-000.
+SELECTION-SCREEN: BEGIN OF LINE.
+*Mensagem 01
+SELECTION-SCREEN: COMMENT 1(18) text-052 FOR FIELD p_msg01 MODIF ID tt.
+PARAMETERS: p_msg01a TYPE zde_mensagem_01 MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Mensagem 02
+SELECTION-SCREEN: COMMENT 1(18) text-053 FOR FIELD p_msg02 MODIF ID tt.
+PARAMETERS: p_msg02a TYPE zde_mensagem_02 MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Mensagem 03
+SELECTION-SCREEN: COMMENT 1(18) text-054 FOR FIELD p_msg03 MODIF ID tt.
+PARAMETERS: p_msg03a TYPE zde_mensagem_03 MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+
+SELECTION-SCREEN: BEGIN OF LINE.
+*Mensagem 04
+SELECTION-SCREEN: COMMENT 1(18) text-055 FOR FIELD p_msg04 MODIF ID tt.
+PARAMETERS: p_msg04a TYPE zde_mensagem_04 MODIF ID tt.
+SELECTION-SCREEN: END OF LINE.
+SELECTION-SCREEN: END OF BLOCK b5.
+
+INITIALIZATION.
+  PERFORM: f4_value_request,
+           f4_tipo_lig.
+
+AT SELECTION-SCREEN OUTPUT.
+*Define se água ou telefonia ou outro ficará visivel.
+  PERFORM visible_invisible.
+
+*Carrega campos automaticamente da UC
+  PERFORM carrega_uc.
+
+*Carrega campos automaticamente de N° Controle
+  PERFORM carrega_ncontrole.
+
+*Bloqueio / Desbloqueio água, esgoto e outros em função do Tipo de lig.
+  PERFORM agua_esgoto_outros.
+
+  PERFORM carrega_forma_pagamento.
+
+  PERFORM carrega_forma_pagamento_outros.
+
+  PERFORM soma_val_tot.
+
+  PERFORM soma_val_tot_outros.
+
+START-OF-SELECTION.
+
+  vg_tcode = sy-tcode.
+
+  EXPORT vg_tcode FROM vg_tcode TO MEMORY ID 'ZTFI838'.
+
+  PERFORM campos_obrigatorios.
+
+  IF vg_error IS INITIAL.
+
+    IF p_tpdesp = c_1.
+
+      PERFORM soma_val_tot.
+
+      PERFORM mapeamento.
+
+      IF vg_706_belnr IS NOT INITIAL.
+        PERFORM gera_protocolo.
+      ENDIF.
+
+      PERFORM exibe_alv.
+
+    ELSE.
+
+      PERFORM soma_val_tot_outros.
+
+      PERFORM mapeamento_outros.
+
+      IF vg_706_belnr IS NOT INITIAL.
+        PERFORM gera_protocolo_outros.
+      ENDIF.
+
+      PERFORM exibe_alv.
+
+    ENDIF.
+
+  ENDIF.
+
+END-OF-SELECTION.
+
+
+*&---------------------------------------------------------------------*
+*&      Form  F4_VALUE_REQUEST
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM f4_value_request .
+
+  DATA: vl_name     TYPE vrm_id,
+        tl_list     TYPE vrm_values,
+        wl_value    LIKE LINE OF tl_list,
+        wl_ztbfi837 TYPE ztbfi837,
+        vl_cont     TYPE i,
+        tl_ztbfi837 TYPE TABLE OF ztbfi837.
+
+  SELECT *
+         FROM ztbfi837
+         INTO TABLE tl_ztbfi837.
+
+  IF sy-subrc = 0.
+
+    LOOP AT tl_ztbfi837 INTO wl_ztbfi837.
+      ADD 1 TO vl_cont.
+      wl_value-key = vl_cont.
+      CONDENSE wl_value-key.
+      wl_value-text = wl_ztbfi837-tp_desp.
+      APPEND wl_value TO tl_list.
+      CLEAR wl_value.
+    ENDLOOP.
+
+  ENDIF.
+
+  tg_list[] = tl_list[].
+
+  vl_name = c_tpdesp.
+  p_tpdesp = c_1.
+
+  CALL FUNCTION 'VRM_SET_VALUES'
+    EXPORTING
+      id              = vl_name
+      values          = tl_list
+    EXCEPTIONS
+      id_illegal_name = 1
+      OTHERS          = 2.
+
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+    WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+  ENDIF.
+
+  LOOP AT SCREEN.
+    IF p_tpdesp = space.
+      IF screen-group1 = c_tt.
+        screen-input = c_0.
+        screen-active = c_0.
+      ENDIF.
+    ENDIF.
+    MODIFY SCREEN.
+  ENDLOOP.
+ENDFORM.                    " F4_VALUE_REQUEST
+*&---------------------------------------------------------------------*
+*&      Form  VISIBLE_INVISIBLE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM visible_invisible .
+
+  LOOP AT SCREEN.
+    IF p_tpdesp = c_1.
+
+      PERFORM limpa_outros.
+      IF screen-group1 = c_tt.
+        screen-input = c_0.
+        screen-active = c_0.
+      ENDIF.
+      IF screen-group1 = c_aa.
+        screen-input = c_1.
+        screen-active = c_1.
+      ENDIF.
+      IF screen-name = c_valtot.
+        screen-input = c_0.
+      ENDIF.
+    ELSE. "IF p_tpdesp = c_2.
+      PERFORM limpa_agua.
+      IF screen-group1 = c_tt.
+        screen-input = c_1.
+        screen-active = c_1.
+      ENDIF.
+      IF screen-group1 = c_aa.
+        screen-input = c_0.
+        screen-active = c_0.
+      ENDIF.
+      IF screen-name = c_pstcd1
+      OR screen-name = c_pdebito
+      OR screen-name = c_icmse2
+      OR screen-name = c_icms2a
+      OR screen-name = c_cicms2
+      OR screen-name = c_dicms2
+      OR screen-name = c_wrbtr.
+        screen-input = c_0.
+      ENDIF.
+    ENDIF.
+    MODIFY SCREEN.
+  ENDLOOP.
+
+ENDFORM.                    " VISIBLE_INVISIBLE
+*&---------------------------------------------------------------------*
+*&      Form  F4_TIPO_LIG
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM f4_tipo_lig .
+
+  DATA: vl_name TYPE vrm_id,
+        tl_list TYPE vrm_values,
+        wl_value LIKE LINE OF tl_list.
+
+  wl_value-key = c_1.
+  wl_value-text = c_agua.
+  APPEND wl_value TO tl_list.
+  CLEAR wl_value.
+
+  wl_value-key = c_2.
+  wl_value-text = c_esgoto.
+  APPEND wl_value TO tl_list.
+  CLEAR wl_value.
+
+  wl_value-key = c_3.
+  wl_value-text = c_agesgoto.
+  APPEND wl_value TO tl_list.
+  CLEAR wl_value.
+
+  vl_name = c_tplig.
+
+  CALL FUNCTION 'VRM_SET_VALUES'
+    EXPORTING
+      id              = vl_name
+      values          = tl_list
+    EXCEPTIONS
+      id_illegal_name = 1
+      OTHERS          = 2.
+
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+    WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+  ENDIF.
+
+ENDFORM.                    " F4_TIPO_LIG
+*&---------------------------------------------------------------------*
+*&      Form  CARREGA_UC
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM carrega_uc .
+
+  IF p_uc IS NOT INITIAL.
+    CLEAR:wg_ztbfi839.
+
+    SELECT SINGLE lifnr
+                  bukrs
+                  registro_inativo
+                  descricao
+                  kostl
+                  ordem
+                  bupla
+                  tipo
+                  cod_debt_aut
+                  deb_automa
+                   FROM ztbfi839
+                   INTO wg_ztbfi839
+                   WHERE uc = p_uc.
+    IF sy-subrc = 0.
+
+      IF wg_ztbfi839-registro_inativo IS NOT INITIAL.
+        PERFORM clear_campos_uc.
+
+        LOOP AT SCREEN.
+          IF screen-name = c_conce
+          OR screen-name = c_bukrs
+          OR screen-name = c_kostl
+          OR screen-name = c_aufnr
+          OR screen-name = c_bupla
+          OR screen-name = c_ident
+          OR screen-name = c_codbeb
+          OR screen-name = c_debaut
+          OR screen-name = c_codb.
+            screen-input = c_1.
+          ENDIF.
+          MODIFY SCREEN.
+        ENDLOOP.
+
+        MESSAGE i000(zb) WITH text-071 DISPLAY LIKE c_e.
+
+      ELSE.
+        p_conce  = wg_ztbfi839-lifnr.
+        p_bukrs  = wg_ztbfi839-bukrs.
+        p_kostl  = wg_ztbfi839-kostl.
+        p_aufnr  = wg_ztbfi839-ordem.
+        p_bupla  = wg_ztbfi839-bupla.
+        p_ident  = wg_ztbfi839-tipo.
+        p_codbeb = wg_ztbfi839-cod_debt_aut.
+        p_debaut = wg_ztbfi839-deb_automa.
+
+
+
+        LOOP AT SCREEN.
+          IF screen-name = c_conce
+          OR screen-name = c_bukrs
+          OR screen-name = c_kostl
+          OR screen-name = c_aufnr
+          OR screen-name = c_bupla
+          OR screen-name = c_ident
+          OR screen-name = c_codbeb
+          OR screen-name = c_debaut.
+            screen-input = c_0.
+          ENDIF.
+
+          IF screen-name = c_codb OR screen-name = c_frmpg.
+            IF wg_ztbfi839-deb_automa IS NOT INITIAL.
+              screen-input = c_0.
+            ELSE.
+              screen-input = c_1.
+            ENDIF.
+          ENDIF.
+
+          MODIFY SCREEN.
+        ENDLOOP.
+      ENDIF.
+    ELSE.
+
+      PERFORM clear_campos_uc.
+
+      LOOP AT SCREEN.
+        IF screen-name = c_conce
+        OR screen-name = c_bukrs
+        OR screen-name = c_kostl
+        OR screen-name = c_aufnr
+        OR screen-name = c_bupla
+        OR screen-name = c_ident
+        OR screen-name = c_codbeb
+        OR screen-name = c_debaut
+        OR screen-name = c_codb.
+          screen-input = c_1.
+        ENDIF.
+        MODIFY SCREEN.
+      ENDLOOP.
+
+      MESSAGE i000(zb) WITH text-001 DISPLAY LIKE c_e.
+
+    ENDIF.
+  ENDIF.
+
+ENDFORM.                    " CARREGA_UC
+*&---------------------------------------------------------------------*
+*&      Form  CLEAR_CAMPOS_UC
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM clear_campos_uc .
+
+  CLEAR:p_conce,
+        p_bukrs,
+        p_kostl,
+        p_aufnr,
+        p_bupla,
+        p_ident,
+        p_codbeb,
+        p_debaut,
+        p_codb.
+
+ENDFORM.                    " CLEAR_CAMPOS_UC
+*&---------------------------------------------------------------------*
+*&      Form  AGUA_ESGOTO_OUTROS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM agua_esgoto_outros .
+
+  LOOP AT SCREEN.
+    CASE p_tplig .
+      WHEN c_1."Água
+        IF screen-name = c_pagua OR screen-name = c_pesgoto OR screen-name = c_poutros.
+          screen-input = c_1.
+        ENDIF.
+      WHEN c_2."Esgoto
+        IF screen-name = c_pagua OR screen-name = c_poutros.
+          screen-input = c_0.
+        ENDIF.
+
+        IF screen-name = c_pesgoto.
+          screen-input = c_1.
+        ENDIF.
+      WHEN c_3."Água e Esgoto
+        IF screen-name = c_pagua OR screen-name = c_pesgoto.
+          screen-input = c_1.
+        ENDIF.
+
+        IF screen-name = c_poutros.
+          screen-input = c_0.
+        ENDIF.
+    ENDCASE.
+    MODIFY SCREEN.
+  ENDLOOP.
+
+ENDFORM.                    " AGUA_ESGOTO_OUTROS
+*&---------------------------------------------------------------------*
+*&      Form  CARREGA_TELEFONE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM carrega_ncontrole .
+
+  IF p_uct IS NOT INITIAL.
+    SELECT SINGLE bukrs
+                  registro_inativo
+                  bupla
+                  kostl
+                  lifnr
+                  stcd1
+                  cod_debt_aut
+                  deb_automa
+                  ordem
+                  FROM ztbfi839
+                  INTO wg_ztbfi839t
+                  WHERE uc = p_uct.
+    IF sy-subrc = 0.
+      IF wg_ztbfi839t-registro_inativo IS NOT INITIAL.
+        MESSAGE i000(zb) WITH text-072 DISPLAY LIKE c_e.
+        PERFORM clear_campos_ncontrole.
+
+        LOOP AT SCREEN.
+          IF screen-name = c_bukrs2
+          OR screen-name = c_bupla2
+          OR screen-name = c_kostl2
+          OR screen-name = c_lifnr2
+          OR screen-name = c_stcd1
+          OR screen-name = c_debito
+          OR screen-name = c_debau2
+          OR screen-name = c_aufnr2.
+            screen-input = c_1.
+          ENDIF.
+          MODIFY SCREEN.
+        ENDLOOP.
+      ELSE.
+        p_bukrs2 = wg_ztbfi839t-bukrs.
+        p_bupla2 = wg_ztbfi839t-bupla.
+        p_kostl2 = wg_ztbfi839t-kostl.
+        p_lifnr2 = wg_ztbfi839t-lifnr.
+        p_stcd1  = wg_ztbfi839t-stcd1.
+        p_debito = wg_ztbfi839t-cod_debt_aut.
+        p_debau2 = wg_ztbfi839t-deb_automa.
+        p_aufnr2 = wg_ztbfi839t-ordem.
+
+        LOOP AT SCREEN.
+          IF screen-name = c_bukrs2
+          OR screen-name = c_bupla2
+          OR screen-name = c_kostl2
+          OR screen-name = c_lifnr2
+          OR screen-name = c_stcd1
+          OR screen-name = c_debito
+          OR screen-name = c_debau2
+          OR screen-name = c_aufnr2.
+            screen-input = c_0.
+          ENDIF.
+          IF screen-name = c_codb2 OR screen-name = c_zlsch.
+            IF wg_ztbfi839t-deb_automa IS NOT INITIAL.
+              screen-input = c_0.
+            ELSE.
+              screen-input = c_1.
+            ENDIF.
+          ENDIF.
+          MODIFY SCREEN.
+        ENDLOOP.
+      ENDIF.
+    ELSE.
+      PERFORM clear_campos_ncontrole.
+
+      LOOP AT SCREEN.
+        IF screen-name = c_bukrs2
+        OR screen-name = c_bupla2
+        OR screen-name = c_kostl2
+        OR screen-name = c_lifnr2
+        OR screen-name = c_stcd1
+        OR screen-name = c_debito
+        OR screen-name = c_debau2
+        OR screen-name = c_aufnr2.
+          screen-input = c_1.
+        ENDIF.
+        MODIFY SCREEN.
+      ENDLOOP.
+
+      MESSAGE i000(zb) WITH text-064 DISPLAY LIKE c_e.
+
+    ENDIF.
+  ENDIF.
+
+ENDFORM.                    " CARREGA_TELEFONE
+*&---------------------------------------------------------------------*
+*&      Form  CLEAR_CAMPOS_TELEFONE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM clear_campos_ncontrole.
+
+  CLEAR:p_bukrs2,
+        p_bupla2,
+        p_kostl2,
+        p_lifnr2,
+        p_stcd1,
+        p_debito,
+        p_aufnr2.
+
+ENDFORM.                    " CLEAR_CAMPOS_TELEFONE
+*&---------------------------------------------------------------------*
+*&      Form  LIMPA_OUTROS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM limpa_outros .
+
+  CLEAR:p_uct,
+        p_lifnr2,
+        p_stcd1,
+        p_bldat2,
+        p_bukrs2,
+        p_kostl2,
+        p_bupla2,
+        p_xblnr,
+        p_seriex,
+        p_nfnum,
+        p_series,
+        p_wrbtr,
+        p_zfbdt,
+        p_totnf2,
+        p_base,
+        p_rate ,
+        p_debito,
+        p_taxval,
+        p_bktxt,
+        p_zlsch,
+        p_kwh,
+        s_multa,
+        s_juro,
+        p_msg01a,
+        p_msg02a,
+        p_msg03a,
+        p_msg04a,
+        p_aufnr2.
+
+ENDFORM.                    " LIMPA_OUTROS
+*&---------------------------------------------------------------------*
+*&      Form  LIMPA_AGUA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM limpa_agua.
+
+  CLEAR:p_chave,
+        p_uc,
+        p_conce,
+        p_dtemis,
+        p_ident,
+        p_bukrs,
+        p_kostl,
+        p_aufnr,
+        p_bupla,
+        p_notafi,
+        p_numfat,
+        p_tplig,
+        p_hidro,
+        p_agua,
+        p_esgoto,
+        p_outros,
+        p_valtot,
+        p_dtvenc,
+        p_aliq,
+        p_basec,
+        p_valor,
+        p_totnf,
+*        p_sim,
+*        p_nao,
+*        p_alicms,
+        p_codbeb,
+*        p_vlicms,
+        p_debaut,
+        p_txtca,
+        p_frmpg,
+        p_codb,
+*        p_ppcof,
+*        p_aliq2,
+*        p_basec2,
+*        p_valor2,
+        p_juros,
+        p_multa,
+        p_consu,
+        p_pconsu,
+        p_tabtaf,
+        p_msg01,
+        p_msg02,
+        p_msg03,
+        p_msg04,
+        p_ctexto.
+
+*  p_sim = abap_true.
+
+ENDFORM.                    " LIMPA_AGUA
+*&---------------------------------------------------------------------*
+*&      Form  CAMPOS_OBRIGATORIOS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM campos_obrigatorios .
+
+  IF p_tpdesp = c_1.
+
+    PERFORM campos_obrigatorios_agua.
+
+  ELSE.
+
+    PERFORM campos_obrigatorios_outros.
+
+  ENDIF.
+
+ENDFORM.                    " CAMPOS_OBRIGATORIOS
+*&---------------------------------------------------------------------*
+*&      Form  CAMPOS_OBRIGATORIOS_AGUA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM campos_obrigatorios_agua .
+
+  CLEAR vg_error.
+
+*  IF p_chave IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-002 text-066 DISPLAY LIKE c_e.
+*    vg_error = abap_true.
+  IF p_uc IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-003 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_conce IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-004 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_dtemis IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-005 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_ident IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-006 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_bukrs IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-007 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_kostl IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-008 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_aufnr IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-009 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_bupla IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-010 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_notafi IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-011 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_numfat IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-012 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_tplig IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-013 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_hidro IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-014 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+*  ELSEIF p_agua IS INITIAL AND ( p_tplig = c_1 OR p_tplig = c_3 ).
+*    MESSAGE s000(zb) WITH text-065 text-016 text-066 DISPLAY LIKE c_e.
+*    vg_error = abap_true.
+*  ELSEIF p_esgoto IS INITIAL AND ( p_tplig = c_1 OR p_tplig = c_2 OR p_tplig = c_3 ).
+*    MESSAGE s000(zb) WITH text-065 text-017 text-066 DISPLAY LIKE c_e.
+*    vg_error = abap_true.
+*  ELSEIF p_outros IS INITIAL.
+*    IF p_tplig = c_1.
+*      MESSAGE s000(zb) WITH text-065 text-018 text-066 DISPLAY LIKE c_e.
+*      vg_error = abap_true.
+*    ENDIF.
+  ELSEIF p_valtot IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-019 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_dtvenc IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-020 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+*  ELSEIF p_aliq IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-022 text-066 DISPLAY LIKE c_e.
+*    LEAVE LIST-PROCESSING.
+*    vg_error = abap_true.
+*  ELSEIF p_basec IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-023 text-066 DISPLAY LIKE c_e.
+*    LEAVE LIST-PROCESSING.
+*    vg_error = abap_true.
+*  ELSEIF p_valor IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-024 text-066 DISPLAY LIKE c_e.
+*    LEAVE LIST-PROCESSING.
+*    vg_error = abap_true.
+  ELSEIF p_totnf IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-025 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+*  ELSEIF p_alicms IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-030 text-066 DISPLAY LIKE c_e.
+*    vg_error = abap_true.
+  ELSEIF p_codbeb IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-031 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+*  ELSEIF p_vlicms IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-032 text-066 DISPLAY LIKE c_e.
+*    vg_error = abap_true.
+*  ELSEIF p_txtca IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-034 text-066 DISPLAY LIKE c_e.
+*    LEAVE LIST-PROCESSING.
+*    vg_error = abap_true.
+  ELSEIF p_frmpg IS INITIAL AND p_debaut IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-035 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_codb IS INITIAL AND p_debaut IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-036 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+*  ELSEIF p_ppcof IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-040 text-066 DISPLAY LIKE c_e.
+*    vg_error = abap_true.
+*  ELSEIF p_aliq2 IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-041 text-066 DISPLAY LIKE c_e.
+*    vg_error = abap_true.
+*  ELSEIF p_basec2 IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-042 text-066 DISPLAY LIKE c_e.
+*    vg_error = abap_true.
+*  ELSEIF p_valor2 IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-044 text-066 DISPLAY LIKE c_e.
+*    vg_error = abap_true.
+*  ELSEIF p_tabtaf IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-050 text-066 DISPLAY LIKE c_e.
+*    LEAVE LIST-PROCESSING.
+*    vg_error = abap_true.
+  ELSEIF p_serix2 IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-067 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_serie2 IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-067 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ENDIF.
+
+  IF p_debaut IS INITIAL.
+    IF NOT  p_codb IS INITIAL.
+      vg_706_barra = p_codb(3).
+      CLEAR: vg_706_bankl.
+      SELECT SINGLE bankl
+               INTO vg_706_bankl
+               FROM bnka
+              WHERE banks EQ c_pais
+                AND bankl EQ vg_706_barra
+                AND loevm = ' '.
+      IF NOT vg_706_bankl IS INITIAL.
+        vg_barcode = strlen( p_codb ).
+        IF vg_barcode NE c_barcode.
+          MESSAGE s000 WITH 'Informar código de barras com 47 posições' DISPLAY LIKE c_e.
+          LEAVE LIST-PROCESSING.
+          vg_error = abap_true.
+        ENDIF.
+      ELSE.
+        vg_barcode = strlen( p_codb ).
+        IF vg_barcode < c_barcod.
+          MESSAGE s000 WITH 'Informar código de barras com 48 posições' DISPLAY LIKE c_e.
+          LEAVE LIST-PROCESSING.
+          vg_error = abap_true.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
+  IF p_debaut IS NOT INITIAL.
+    CLEAR p_frmpg.
+  ENDIF.
+
+ENDFORM.                    " CAMPOS_OBRIGATORIOS_AGUA
+*&---------------------------------------------------------------------*
+*&      Form  CAMPOS_OBRIGATORIOS_OUTROS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM campos_obrigatorios_outros .
+
+  IF p_uct IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-063 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_lifnr2 IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-004 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_bldat2 IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-005 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_bukrs2 IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-007 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_kostl2 IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-008 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_bupla2 IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-010 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_xblnr IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-011 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_seriex IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-067 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_nfnum IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-012 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_series IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-067 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_wrbtr IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-019 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_zfbdt IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-020 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_totnf2 IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-025 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_base IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-026 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+*  ELSEIF p_rate IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-030 text-066 DISPLAY LIKE c_e.
+*    vg_error = abap_true.
+  ELSEIF p_debito IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-031 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+*  ELSEIF p_taxval IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-032 text-066 DISPLAY LIKE c_e.
+*    vg_error = abap_true.
+*  ELSEIF p_bktxt IS INITIAL.
+*    MESSAGE s000(zb) WITH text-065 text-034 text-066 DISPLAY LIKE c_e.
+*    vg_error = abap_true.
+  ELSEIF p_zlsch IS INITIAL AND p_debau2 IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-035 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ELSEIF p_codb2 IS INITIAL AND p_debau2 IS INITIAL.
+    MESSAGE s000(zb) WITH text-065 text-036 text-066 DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+    vg_error = abap_true.
+  ENDIF.
+
+  IF p_debau2 IS INITIAL.
+    IF NOT  p_codb2 IS INITIAL.
+      vg_706_barra = p_codb2(3).
+      CLEAR: vg_706_bankl.
+      SELECT SINGLE bankl
+               INTO vg_706_bankl
+               FROM bnka
+              WHERE banks EQ c_pais
+                AND bankl EQ vg_706_barra
+                AND loevm = ' '.
+      IF NOT vg_706_bankl IS INITIAL.
+        vg_barcode = strlen( p_codb2 ).
+        IF vg_barcode NE c_barcode.
+          MESSAGE s000 WITH 'Informar código de barras com 47 posições' DISPLAY LIKE c_e.
+          LEAVE LIST-PROCESSING.
+          vg_error = abap_true.
+        ENDIF.
+      ELSE.
+        vg_barcode = strlen( p_codb2 ).
+        IF vg_barcode < c_barcod.
+          MESSAGE s000 WITH 'Informar código de barras com 48 posições' DISPLAY LIKE c_e.
+          LEAVE LIST-PROCESSING.
+          vg_error = abap_true.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
+  IF p_debau2 IS NOT INITIAL.
+    CLEAR p_zlsch.
+  ENDIF.
+
+ENDFORM.                    " CAMPOS_OBRIGATORIOS_OUTROS
+*&---------------------------------------------------------------------*
+*&      Form  BAPI
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM mapeamento .
+  DATA:vl_emiss TYPE budat,
+       vl_venc  TYPE budat,
+       vl_nfnum TYPE string.
+
+  CONCATENATE  p_numfat '-' p_serie2 INTO vl_nfnum.
+  CONDENSE vl_nfnum NO-GAPS.
+
+  CLEAR:vl_emiss,vg_msgno,vg_messg,vl_venc.
+
+  CONCATENATE p_dtemis+6(2) p_dtemis+4(2) p_dtemis(4)
+         INTO vl_emiss.
+
+  CONCATENATE p_dtvenc+6(2) p_dtvenc+4(2) p_dtvenc(4)
+       INTO vl_venc.
+
+  IF p_debaut IS NOT INITIAL.
+    vg_blart = c_l6.
+  ELSE.
+    vg_blart = c_l9.
+  ENDIF.
+
+  PERFORM busca_7000.
+  PERFORM busca_hkont_multa_juros.
+
+  vg_wrbtr = p_valtot.
+  TRANSLATE vg_wrbtr USING '.,'.
+
+  vg_wrbtr_a = p_agua.
+  TRANSLATE vg_wrbtr_a USING '.,'.
+
+  vg_wrbtr_e = p_esgoto.
+  TRANSLATE vg_wrbtr_e USING '.,'.
+
+  vg_wrbtr_j = p_juros.
+  TRANSLATE vg_wrbtr_j USING '.,'.
+
+  vg_wrbtr_m = p_multa.
+  TRANSLATE vg_wrbtr_m USING '.,'.
+
+  vg_wrbtr_o = p_outros.
+  TRANSLATE vg_wrbtr_o USING '.,'.
+
+  vg_menge = p_consu.
+  TRANSLATE vg_menge USING '.,'.
+
+  PERFORM get_sgtxt CHANGING vg_sgtxt.
+
+  PERFORM z_preenche_bdc USING:
+'X'    'SAPMF05A'           '1100',
+' '    'BDC_OKCODE'         '/ECCDE',
+'X'    'SAPLACHD'           '1000',
+' '    'BDC_CURSOR'         'BKPF-BUKRS',
+' '    'BDC_OKCODE'         '=ENTR',
+' '    'BKPF-BUKRS'         p_bukrs.
+
+  CALL TRANSACTION 'FB60' USING tg_bdcdata
+                  MODE  vg_mode
+                  UPDATE vg_s
+                  MESSAGES INTO tg_msg.
+
+  CLEAR:tg_bdcdata[].
+
+  PERFORM z_preenche_bdc USING:
+       'X'    'SAPMF05A'           '1100',
+       ' '    'BDC_OKCODE'         '0100',
+       ' '    'RF05A-BUSCS'        'R',
+       ' '    'BDC_SUBSCR'         'SAPLFDCB                                0010PAGE',
+       ' '    'BDC_CURSOR'         'INVFO-BLART',
+       ' '    'INVFO-ACCNT'         p_conce,
+       ' '    'INVFO-BLDAT'         vl_emiss,
+       ' '    'INVFO-XBLNR'         vl_nfnum, "p_numfat,
+*       ' '    'INVFO-BUDAT'         vl_emiss,
+       ' '    'INVFO-BLART'         vg_blart,
+       ' '    'INVFO-WAERS'         'BRL',
+       ' '    'BDC_SUBSCR'          'SAPLF0KI                                0100SUBBAS01',
+       ' '    'BDC_SUBSCR'          'SAPLFMFG_PPA_INV_EXT                    5001SUBBAS02',
+       ' '    'BDC_SUBSCR'          'SAPM_WRF_PREPAY_SCREENS                 0100SUBBAS03',
+       ' '    'BDC_SUBSCR'          'SAPLSEXM                                0200SUBBAS04',
+       ' '    'BDC_SUBSCR'          'SAPLSEXM                                0200SUBBAS05',
+       ' '    'BDC_SUBSCR'          'SAPLSEXM                                0200SUBBAS06',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0070ADR',
+       ' '    'BDC_SUBSCR'          'SAPLFSKB                                0100ITEMS',
+
+       'X'    'SAPMF05A'            '1100',
+       ' '    'BDC_OKCODE'          '/00',
+       ' '    'RF05A-BUSCS'         'R',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0010PAGE',
+       ' '    'INVFO-ACCNT'          p_conce,
+       ' '    'INVFO-XBLNR'          vl_nfnum, "p_numfat,
+       ' '    'INVFO-BLART'          vg_blart,
+       ' '    'INVFO-WRBTR'          vg_wrbtr,
+       ' '    'INVFO-WAERS'          'BRL',
+       ' '    'INVFO-BUPLA'          p_bupla,
+       ' '    'INVFO-SGTXT'          vg_sgtxt,
+       ' '    'BDC_SUBSCR'           'SAPLF0KI                                0100SUBBAS01',
+       ' '    'BDC_SUBSCR'           'SAPLFMFG_PPA_INV_EXT                    5001SUBBAS02',
+       ' '    'BDC_SUBSCR'           'SAPM_WRF_PREPAY_SCREENS                 0100SUBBAS03',
+       ' '    'BDC_SUBSCR'           'SAPLSEXM                                0200SUBBAS04',
+       ' '    'BDC_SUBSCR'           'SAPLSEXM                                0200SUBBAS05',
+       ' '    'BDC_SUBSCR'           'SAPLSEXM                                0200SUBBAS06',
+       ' '    'BDC_SUBSCR'           'SAPLFDCB                                0070ADR',
+       ' '    'BDC_SUBSCR'           'SAPLFSKB                                0100ITEMS',
+       ' '    'BDC_CURSOR'           'ACGL_ITEM-SGTXT(01)'.
+
+  PERFORM get_conta USING p_kostl.
+
+  IF p_agua IS NOT INITIAL.
+
+    PERFORM z_preenche_bdc USING:
+      ' '    'ACGL_ITEM-HKONT(01)'  vg_conta,
+      ' '    'ACGL_ITEM-WRBTR(01)'  vg_wrbtr_a,
+      ' '    'ACGL_ITEM-SGTXT(01)'  vg_sgtxt,
+      ' '    'ACGL_ITEM-KOSTL(01)'  p_kostl,
+      ' '    'ACGL_ITEM-AUFNR(01)'  p_aufnr,
+      ' '    'ACGL_ITEM-MENGE(01)'  vg_menge,
+      ' '    'ACGL_ITEM-MEINS(01)' 'MWH'.
+  ENDIF.
+
+  IF p_esgoto IS NOT INITIAL.
+    PERFORM z_preenche_bdc USING:
+      ' '    'ACGL_ITEM-HKONT(02)'  vg_conta,
+      ' '    'ACGL_ITEM-WRBTR(02)'  vg_wrbtr_e,
+      ' '    'ACGL_ITEM-SGTXT(02)'  vg_sgtxt,
+      ' '    'ACGL_ITEM-KOSTL(02)'  p_kostl,
+      ' '    'ACGL_ITEM-AUFNR(02)'  p_aufnr.
+  ENDIF.
+
+  PERFORM get_conta_outros USING p_kostl.
+  IF p_outros IS NOT INITIAL.
+    PERFORM z_preenche_bdc USING:
+      ' '    'ACGL_ITEM-HKONT(05)'  vg_conta_outros,
+      ' '    'ACGL_ITEM-WRBTR(05)'  vg_wrbtr_j,
+      ' '    'ACGL_ITEM-SGTXT(05)'  vg_sgtxt,
+      ' '    'ACGL_ITEM-KOSTL(05)'  p_kostl,
+      ' '    'ACGL_ITEM-AUFNR(05)'  p_aufnr.
+  ENDIF.
+
+  IF p_juros IS NOT INITIAL.
+    PERFORM z_preenche_bdc USING:
+      ' '    'ACGL_ITEM-HKONT(03)'  vg_conta_juros,
+      ' '    'ACGL_ITEM-WRBTR(03)'  vg_wrbtr_j,
+      ' '    'ACGL_ITEM-SGTXT(03)'  vg_sgtxt,
+      ' '    'ACGL_ITEM-KOSTL(03)'  p_kostl,
+      ' '    'ACGL_ITEM-AUFNR(03)'  p_aufnr.
+  ENDIF.
+
+  IF p_multa IS NOT INITIAL.
+    IF p_kostl+2(2) = c_mz.
+      CONCATENATE p_kostl(6) vg_7000 INTO vg_kostl_multa.
+    ELSE.
+      PERFORM busca_kostl USING p_kostl
+                          CHANGING vg_kostl_multa.
+    ENDIF.
+    PERFORM z_preenche_bdc USING:
+      ' '    'ACGL_ITEM-HKONT(04)'  vg_conta_multa,
+      ' '    'ACGL_ITEM-WRBTR(04)'  vg_wrbtr_m,
+      ' '    'ACGL_ITEM-SGTXT(04)'  vg_sgtxt,
+      ' '    'ACGL_ITEM-KOSTL(04)'  vg_kostl_multa,
+      ' '    'ACGL_ITEM-AUFNR(04)'  p_aufnr.
+  ENDIF.
+
+  PERFORM z_preenche_bdc USING:
+       'X'    'SAPMF05A'            '1100',
+       ' '    'BDC_OKCODE'          '=PAYM',
+       ' '    'RF05A-BUSCS'         'R',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0010PAGE',
+       ' '    'INVFO-ACCNT'         p_conce,
+       ' '    'INVFO-XBLNR'         vl_nfnum, "p_numfat,
+       ' '    'INVFO-BLART'         vg_blart,
+       ' '    'INVFO-WRBTR'         vg_wrbtr,
+       ' '    'INVFO-BUPLA'         p_bupla,
+       ' '    'INVFO-SGTXT'         vg_sgtxt,
+       ' '    'BDC_SUBSCR'          'SAPLF0KI                                0100SUBBAS01',
+       ' '    'BDC_SUBSCR'          'SAPLFMFG_PPA_INV_EXT                    5001SUBBAS02',
+       ' '    'BDC_SUBSCR'          'SAPM_WRF_PREPAY_SCREENS                 0100SUBBAS03',
+       ' '    'BDC_SUBSCR'          'SAPLSEXM                                0200SUBBAS04',
+       ' '    'BDC_SUBSCR'          'SAPLSEXM                                0200SUBBAS05',
+       ' '    'BDC_SUBSCR'          'SAPLSEXM                                0200SUBBAS06',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0070ADR',
+       ' '    'BDC_SUBSCR'          'SAPLFSKB                                0100ITEMS',
+       ' '    'BDC_CURSOR'          'ACGL_ITEM-HKONT(02)',
+
+       'X'    'SAPMF05A'            '1100',
+       ' '    'BDC_OKCODE'          '/00',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0020PAGE',
+       ' '    'BDC_CURSOR'          'INVFO-ZLSCH',
+*       ' '    'INVFO-ZFBDT'        '26.01.2024'    "??????
+*       ' '    'INVFO-ZTERM'        'VCTO'      "??????
+*       ' '    'INVFO-ZBD1T'        6    "??????
+       ' '    'INVFO-ZLSCH'	        p_frmpg,
+
+       ' '    'BDC_CURSOR'           'INVFO-ZFBDT',
+       ' '    'INVFO-ZFBDT'         vl_venc,
+
+
+*       ' '    'INVFO-ZLSPR'  W
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0070ADR',
+       ' '    'BDC_SUBSCR'          'SAPLFSKB                                0100ITEMS'.
+
+  IF p_frmpg = c_0 OR p_frmpg = c_hifen.
+    PERFORM z_preenche_bdc USING:
+         'X'    'SAPLSPO4'            '0300',
+         ' '    'BDC_CURSOR'          'SVALD-VALUE(01)',
+         ' '    'BDC_OKCODE'          '=FURT',
+         ' '    'SVALD-VALUE(01)'     p_codb.
+  ENDIF.
+
+  PERFORM z_preenche_bdc USING:
+       'X'    'SAPMF05A'            '1100',
+       ' '    'BDC_OKCODE'          '/00',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0020PAGE',
+       ' '    'BDC_CURSOR'          'INVFO-ZFBDT',
+       ' '    'INVFO-ZFBDT'         vl_venc,
+       ' '    'INVFO-ZTERM'         'VCTO',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0070ADR',
+       ' '    'BDC_SUBSCR'          'SAPLFSKB                                0100ITEMS'.
+
+  IF p_frmpg = c_0 OR p_frmpg = c_hifen.
+    PERFORM z_preenche_bdc USING:
+         'X'    'SAPLSPO4'            '0300',
+         ' '    'BDC_CURSOR'          'SVALD-VALUE(01)',
+         ' '    'BDC_OKCODE'          '=FURT',
+         ' '    'SVALD-VALUE(01)'     p_codb.
+  ENDIF.
+
+  PERFORM z_preenche_bdc USING:
+       'X'    'SAPMF05A'            '1100',
+       ' '    'BDC_OKCODE'          '/00',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0020PAGE',
+       ' '    'BDC_CURSOR'          'INVFO-ZFBDT',
+       ' '    'INVFO-ZFBDT'         vl_venc,
+       ' '    'INVFO-ZTERM'         'VCTO',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0070ADR',
+       ' '    'BDC_SUBSCR'          'SAPLFSKB                                0100ITEMS'.
+
+  IF p_frmpg = c_0 OR p_frmpg = c_hifen.
+    PERFORM z_preenche_bdc USING:
+         'X'    'SAPLSPO4'            '0300',
+         ' '    'BDC_CURSOR'          'SVALD-VALUE(01)',
+         ' '    'BDC_OKCODE'          '=FURT',
+         ' '    'SVALD-VALUE(01)'     p_codb.
+  ENDIF.
+
+  PERFORM z_preenche_bdc USING:
+       'X'    'SAPMF05A'            '1100',
+       ' '    'BDC_OKCODE'          '=BU',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0020PAGE',
+       ' '    'BDC_CURSOR'          'INVFO-ZLSCH',
+*       ' '    'INVFO-ZFBDT'        '26.01.2024'    "??????
+       ' '    'INVFO-ZTERM'        'VCTO',
+*       ' '    'INVFO-ZBD1T'        6    "??????
+       ' '    'INVFO-ZLSCH'	        p_frmpg,
+
+       ' '    'BDC_CURSOR'           'INVFO-ZFBDT',
+       ' '    'INVFO-ZFBDT'         vl_venc,
+*       ' '    'INVFO-ZLSPR'  W,
+
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0070ADR',
+       ' '    'BDC_SUBSCR'          'SAPLFSKB                                0100ITEMS',
+
+       'X'    'SAPLSPO4'            '0300',
+       ' '    'BDC_CURSOR'          'SVALD-VALUE(01)',
+       ' '    'BDC_OKCODE'          '=FURT'.
+
+  CALL TRANSACTION 'FB60' USING tg_bdcdata
+                    MODE  vg_mode
+                    UPDATE vg_s
+                    MESSAGES INTO tg_msg.
+
+  DATA:l_msg         TYPE char200.
+  LOOP AT tg_msg INTO wg_msg.
+
+    IF wg_msg-msgnr = c_298 OR wg_msg-msgnr = c_055.
+      CONTINUE.
+    ENDIF.
+
+    vg_msgno = wg_msg-msgnr.
+
+    IF vg_msgno = c_312 AND wg_msg-msgtyp = c_s.
+      vg_706_belnr = wg_msg-msgv1.
+      vg_706_comp  = wg_msg-msgv2.
+      vg_706_gjahr = sy-datum(4).
+*      vg_706_gjahr = p_dtemis(4).
+    ENDIF.
+
+    CLEAR l_msg.
+    CALL FUNCTION 'MESSAGE_TEXT_BUILD'
+      EXPORTING
+        msgid               = wg_msg-msgid
+        msgnr               = wg_msg-msgnr
+        msgv1               = wg_msg-msgv1
+        msgv2               = wg_msg-msgv2
+        msgv3               = wg_msg-msgv3
+        msgv4               = wg_msg-msgv4
+      IMPORTING
+        message_text_output = l_msg
+      EXCEPTIONS
+        not_found           = 1
+        OTHERS              = 2.
+    IF wg_msg-msgtyp = c_w OR wg_msg-msgtyp = c_i.
+      wg_final-msgtyp = c_aviso.
+      CONTINUE.
+    ENDIF.
+
+    IF wg_msg-msgtyp = c_e.
+*      vg_error = abap_true.
+      wg_final-msgtyp = c_erro.
+    ENDIF.
+
+    IF wg_msg-msgtyp = c_s.
+      wg_final-msgtyp = c_ok.
+    ENDIF.
+
+*    wg_final-message = vg_messg.
+    wg_final-message = l_msg.
+
+    APPEND wg_final TO tg_final.
+
+  ENDLOOP.
+
+*Retira bloqueio W
+  IF p_debaut IS NOT INITIAL.
+    PERFORM retira_bloqueio_w.
+  ENDIF.
+
+*Adiciona chv ref 3
+  IF p_codbeb IS NOT INITIAL.
+    IF vg_blart = c_l6.
+      PERFORM adiciona_chv_ref3 USING p_codbeb.
+    ENDIF.
+  ENDIF.
+
+*Atualiza Barcode
+  IF vg_706_belnr IS NOT INITIAL.
+    vg_barcode = strlen( p_codb ).
+    IF vg_barcode > c_barcode.
+      PERFORM atualiza_barcode.
+    ENDIF.
+  ENDIF.
+
+  LOOP AT tg_final ASSIGNING <fl_final>.
+    <fl_final>-belnr =  vg_706_belnr.
+    <fl_final>-bukrs =  vg_706_comp.
+    <fl_final>-gjahr =  vg_706_gjahr.
+  ENDLOOP.
+
+ENDFORM.                    "
+*&---------------------------------------------------------------------*
+*&      Form  Z_PREENCHE_BDC
+*&---------------------------------------------------------------------*
+"  Se Dynbegin = 'X' ele preenche as informações da tela, senão ele preenche
+" o campo e o dado dela. prontio.
+*&---------------------------------------------------------------------*
+*&      Form  z_preenche_bdc
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      -->DYNBEGIN   text
+*      -->NAME       text
+*      -->VALUE      text
+*----------------------------------------------------------------------*
+FORM z_preenche_bdc  USING dynbegin
+                           name
+                           value.
+  IF dynbegin = 'X'.
+    MOVE: name      TO wg_bdcdata-program,
+          value     TO wg_bdcdata-dynpro,
+          dynbegin  TO wg_bdcdata-dynbegin.
+    APPEND wg_bdcdata TO tg_bdcdata.
+  ELSE.
+
+    MOVE: name  TO wg_bdcdata-fnam,
+          value TO wg_bdcdata-fval.
+    CONDENSE wg_bdcdata-fval.
+    APPEND wg_bdcdata TO tg_bdcdata.
+
+  ENDIF.
+  "  prepara a estrutura para o Loop.
+  CLEAR wg_bdcdata.
+ENDFORM.                    "z_preenche_bdc
+*&---------------------------------------------------------------------*
+*&      Form  GET_SGTXT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      <--P_VG_SGTXT  text
+*----------------------------------------------------------------------*
+FORM get_sgtxt  CHANGING p_vg_sgtxt.
+
+  CLEAR:vg_sgtxt.
+  READ TABLE tg_list INTO wg_list WITH KEY key = p_tpdesp.
+  IF sy-subrc = 0.
+    CONCATENATE wg_list-text
+                c_hifen
+                c_fat
+                c_hifen
+                p_codbeb
+                c_hifen
+                p_conce
+                c_hifen
+                p_dtemis+4(2)
+                '/'
+                p_dtemis(4)
+           INTO vg_sgtxt.
+
+    CONDENSE vg_sgtxt NO-GAPS.
+
+  ENDIF.
+
+ENDFORM.                    " GET_SGTXT
+*&---------------------------------------------------------------------*
+*&      Form  GET_SGTXT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      <--P_VG_SGTXT  text
+*----------------------------------------------------------------------*
+FORM get_sgtxt2  CHANGING p_vg_sgtxt.
+
+  CLEAR:vg_sgtxt.
+  READ TABLE tg_list INTO wg_list WITH KEY key = p_tpdesp.
+  IF sy-subrc = 0.
+    CONCATENATE wg_list-text
+                c_hifen
+                c_fat
+                c_hifen
+                p_debito
+                c_hifen
+                p_lifnr2
+                c_hifen
+                p_bldat2+4(2)
+                '/'
+                p_bldat2(4)
+           INTO vg_sgtxt.
+
+    CONDENSE vg_sgtxt NO-GAPS.
+
+  ENDIF.
+
+ENDFORM.                    " GET_SGTXT2
+*&---------------------------------------------------------------------*
+*&      Form  EXIBE_ALV
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM exibe_alv .
+
+* Generation of fieldcat fields.
+  CALL FUNCTION 'REUSE_ALV_FIELDCATALOG_MERGE'
+    EXPORTING
+      i_structure_name       = 'ZSTFI393'
+    CHANGING
+      ct_fieldcat            = tg_alv_fieldcat
+    EXCEPTIONS                                              "#EC *
+      inconsistent_interface = 1
+      program_error          = 2
+      OTHERS                 = 3.
+
+*Hotspot.
+  READ TABLE tg_alv_fieldcat INTO wg_alv_fieldcat WITH KEY fieldname = c_belnr.
+  IF sy-subrc = 0.
+    wg_alv_fieldcat-hotspot = abap_true.
+    MODIFY tg_alv_fieldcat FROM wg_alv_fieldcat INDEX sy-tabix.
+  ENDIF.
+
+*  Generation of ALV.
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      i_callback_program       = sy-repid
+      i_callback_pf_status_set = 'PF_STATUS_ALV'
+      i_callback_user_command  = 'USER_COMMAND'
+      is_layout                = vg_layout
+      it_fieldcat              = tg_alv_fieldcat
+      it_sort                  = tg_sort[]
+      i_save                   = c_a1
+      is_variant               = wg_disvariant
+    TABLES
+      t_outtab                 = tg_final
+    EXCEPTIONS                                              "#EC *
+      program_error            = 1
+      OTHERS                   = 2.
+
+  LEAVE LIST-PROCESSING.
+
+ENDFORM.                    " EXIBE_ALV
+*&---------------------------------------------------------------------*
+*&      Form  PF_STATUS_ALV
+*&---------------------------------------------------------------------*
+FORM pf_status_alv USING i_extab TYPE slis_t_extab.         "#EC CALLED
+
+  SET PF-STATUS c_standard_fullscreen EXCLUDING i_extab.
+
+ENDFORM.                    " PF_STATUS_ALV
+*&---------------------------------------------------------------------*
+*&      Form  BUSCA_HKONT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      <--P_VG_HKONT  text
+*----------------------------------------------------------------------*
+FORM busca_hkont_multa_juros.
+
+  DATA:wl_tvarvc TYPE tvarvc.
+  SELECT SINGLE * FROM tvarvc INTO wl_tvarvc WHERE name LIKE c_z_ztfi838_multa.
+  IF wl_tvarvc-low IS NOT INITIAL.
+    vg_conta_multa = wl_tvarvc-low.
+  ENDIF.
+
+  CLEAR wl_tvarvc.
+  SELECT SINGLE * FROM tvarvc INTO wl_tvarvc WHERE name LIKE c_z_ztfi838_juros.
+  IF wl_tvarvc-low IS NOT INITIAL.
+    vg_conta_juros = wl_tvarvc-low.
+  ENDIF.
+
+ENDFORM.                    " BUSCA_HKONT
+*&---------------------------------------------------------------------*
+*&      Form  MAPEAMENTO_OUTROS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM mapeamento_outros .
+  DATA:vl_emiss TYPE budat,
+       vl_venc  TYPE budat,
+       vl_nfnum TYPE string.
+
+  CONCATENATE  p_nfnum '-' p_series INTO vl_nfnum.
+  CONDENSE vl_nfnum NO-GAPS.
+
+  CLEAR:vl_emiss,vg_msgno,vg_messg,vl_venc.
+
+  CONCATENATE p_bldat2+6(2) p_bldat2+4(2) p_bldat2(4)
+         INTO vl_emiss.
+
+  CONCATENATE p_zfbdt+6(2) p_zfbdt+4(2) p_zfbdt(4)
+         INTO vl_venc.
+
+  IF p_debau2 IS NOT INITIAL.
+    vg_blart = c_l6.
+  ELSE.
+    vg_blart = c_l9.
+  ENDIF.
+
+  PERFORM busca_7000.
+  PERFORM busca_hkont_multa_juros.
+
+  vg_wrbtr = p_wrbtr.
+  TRANSLATE vg_wrbtr USING '.,'.
+
+  vg_wrbtr_j = s_juro.
+  TRANSLATE vg_wrbtr_j USING '.,'.
+
+  vg_wrbtr_m = s_multa.
+  TRANSLATE vg_wrbtr_m USING '.,'.
+
+  vg_nfval_t = p_totnf2.
+  TRANSLATE vg_nfval_t USING '.,'.
+
+  vg_menge = p_kwh.
+  TRANSLATE vg_menge USING '.,'.
+
+  PERFORM get_sgtxt2 CHANGING vg_sgtxt.
+
+  PERFORM z_preenche_bdc USING:
+'X'    'SAPMF05A'           '1100',
+' '    'BDC_OKCODE'         '/ECCDE',
+'X'    'SAPLACHD'           '1000',
+' '    'BDC_CURSOR'         'BKPF-BUKRS',
+' '    'BDC_OKCODE'         '=ENTR',
+' '    'BKPF-BUKRS'         p_bukrs2.
+  CALL TRANSACTION 'FB60' USING tg_bdcdata
+                  MODE  vg_mode
+                  UPDATE vg_s
+                  MESSAGES INTO tg_msg.
+
+  CLEAR:tg_bdcdata[].
+
+  PERFORM z_preenche_bdc USING:
+       'X'    'SAPMF05A'           '1100',
+       ' '    'BDC_OKCODE'         '0100',
+       ' '    'RF05A-BUSCS'        'R',
+       ' '    'BDC_SUBSCR'         'SAPLFDCB                                0010PAGE',
+       ' '    'BDC_CURSOR'         'INVFO-BLART',
+       ' '    'INVFO-ACCNT'         p_lifnr2,
+       ' '    'INVFO-BLDAT'         vl_emiss,
+       ' '    'INVFO-XBLNR'         vl_nfnum,
+*       ' '    'INVFO-BUDAT'         vl_emiss,
+       ' '    'INVFO-BLART'         vg_blart,
+       ' '    'INVFO-WAERS'         'BRL',
+       ' '    'BDC_SUBSCR'          'SAPLF0KI                                0100SUBBAS01',
+       ' '    'BDC_SUBSCR'          'SAPLFMFG_PPA_INV_EXT                    5001SUBBAS02',
+       ' '    'BDC_SUBSCR'          'SAPM_WRF_PREPAY_SCREENS                 0100SUBBAS03',
+       ' '    'BDC_SUBSCR'          'SAPLSEXM                                0200SUBBAS04',
+       ' '    'BDC_SUBSCR'          'SAPLSEXM                                0200SUBBAS05',
+       ' '    'BDC_SUBSCR'          'SAPLSEXM                                0200SUBBAS06',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0070ADR',
+       ' '    'BDC_SUBSCR'          'SAPLFSKB                                0100ITEMS',
+
+       'X'    'SAPMF05A'            '1100',
+       ' '    'BDC_OKCODE'          '/00',
+       ' '    'RF05A-BUSCS'         'R',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0010PAGE',
+       ' '    'INVFO-ACCNT'          p_lifnr2,
+       ' '    'INVFO-XBLNR'          vl_nfnum,
+       ' '    'INVFO-BLART'          vg_blart,
+       ' '    'INVFO-WRBTR'          vg_wrbtr,
+       ' '    'INVFO-WAERS'          'BRL',
+       ' '    'INVFO-BUPLA'          p_bupla,
+       ' '    'INVFO-SGTXT'          vg_sgtxt,
+       ' '    'BDC_SUBSCR'           'SAPLF0KI                                0100SUBBAS01',
+       ' '    'BDC_SUBSCR'           'SAPLFMFG_PPA_INV_EXT                    5001SUBBAS02',
+       ' '    'BDC_SUBSCR'           'SAPM_WRF_PREPAY_SCREENS                 0100SUBBAS03',
+       ' '    'BDC_SUBSCR'           'SAPLSEXM                                0200SUBBAS04',
+       ' '    'BDC_SUBSCR'           'SAPLSEXM                                0200SUBBAS05',
+       ' '    'BDC_SUBSCR'           'SAPLSEXM                                0200SUBBAS06',
+       ' '    'BDC_SUBSCR'           'SAPLFDCB                                0070ADR',
+       ' '    'BDC_SUBSCR'           'SAPLFSKB                                0100ITEMS',
+       ' '    'BDC_CURSOR'           'ACGL_ITEM-SGTXT(01)'.
+
+  PERFORM get_conta USING p_kostl2.
+  IF vg_conta IS NOT INITIAL.
+    PERFORM z_preenche_bdc USING:
+    ' '    'ACGL_ITEM-HKONT(01)'  vg_conta,
+    ' '    'ACGL_ITEM-WRBTR(01)'  vg_nfval_t,
+    ' '    'ACGL_ITEM-SGTXT(01)'  vg_sgtxt,
+    ' '    'ACGL_ITEM-KOSTL(01)'  p_kostl2,
+    ' '    'ACGL_ITEM-AUFNR(01)'  p_aufnr2.
+  ENDIF.
+
+  IF s_juro IS NOT INITIAL.
+    PERFORM z_preenche_bdc USING:
+      ' '    'ACGL_ITEM-HKONT(02)'  vg_conta_juros,
+      ' '    'ACGL_ITEM-WRBTR(02)'  vg_wrbtr_j,
+      ' '    'ACGL_ITEM-SGTXT(02)'  vg_sgtxt,
+      ' '    'ACGL_ITEM-KOSTL(02)'  p_kostl2,
+      ' '    'ACGL_ITEM-AUFNR(02)'  p_aufnr2,
+      ' '    'ACGL_ITEM-MENGE(02)'  vg_menge,
+      ' '    'ACGL_ITEM-MEINS(02)' 'MWH'.
+  ENDIF.
+
+  IF s_multa IS NOT INITIAL.
+    IF p_kostl2+2(2) = c_mz.
+      CONCATENATE p_kostl2(6) vg_7000 INTO vg_kostl_multa.
+    ELSE.
+      PERFORM busca_kostl USING p_kostl2
+                          CHANGING vg_kostl_multa.
+    ENDIF.
+    PERFORM z_preenche_bdc USING:
+      ' '    'ACGL_ITEM-HKONT(03)'  vg_conta_multa,
+      ' '    'ACGL_ITEM-WRBTR(03)'  vg_wrbtr_m,
+      ' '    'ACGL_ITEM-SGTXT(03)'  vg_sgtxt,
+      ' '    'ACGL_ITEM-KOSTL(03)'  vg_kostl_multa,
+      ' '    'ACGL_ITEM-AUFNR(03)'  p_aufnr2.
+  ENDIF.
+
+  PERFORM z_preenche_bdc USING:
+    'X'    'SAPMF05A'            '1100',
+    ' '    'BDC_OKCODE'          '=PAYM',
+    ' '    'RF05A-BUSCS'         'R',
+    ' '    'BDC_SUBSCR'          'SAPLFDCB                                0010PAGE',
+    ' '    'INVFO-ACCNT'         p_lifnr2,
+    ' '    'INVFO-XBLNR'         vl_nfnum,
+    ' '    'INVFO-BLART'         vg_blart,
+    ' '    'INVFO-WRBTR'         vg_wrbtr,
+    ' '    'INVFO-BUPLA'         p_bupla2,
+    ' '    'INVFO-SGTXT'         vg_sgtxt,
+    ' '    'BDC_SUBSCR'          'SAPLF0KI                                0100SUBBAS01',
+    ' '    'BDC_SUBSCR'          'SAPLFMFG_PPA_INV_EXT                    5001SUBBAS02',
+    ' '    'BDC_SUBSCR'          'SAPM_WRF_PREPAY_SCREENS                 0100SUBBAS03',
+    ' '    'BDC_SUBSCR'          'SAPLSEXM                                0200SUBBAS04',
+    ' '    'BDC_SUBSCR'          'SAPLSEXM                                0200SUBBAS05',
+    ' '    'BDC_SUBSCR'          'SAPLSEXM                                0200SUBBAS06',
+    ' '    'BDC_SUBSCR'          'SAPLFDCB                                0070ADR',
+    ' '    'BDC_SUBSCR'          'SAPLFSKB                                0100ITEMS',
+    ' '    'BDC_CURSOR'          'ACGL_ITEM-HKONT(02)',
+
+    'X'    'SAPMF05A'            '1100',
+    ' '    'BDC_OKCODE'          '/00',
+    ' '    'BDC_SUBSCR'          'SAPLFDCB                                0020PAGE',
+    ' '    'BDC_CURSOR'          'INVFO-ZLSCH',
+*       ' '    'INVFO-ZFBDT'        '26.01.2024'    "??????
+       ' '    'INVFO-ZTERM'        'VCTO',
+*       ' '    'INVFO-ZBD1T'        6    "??????
+    ' '    'INVFO-ZLSCH'          p_zlsch,
+*       ' '    'INVFO-ZLSPR'  W
+    ' '    'BDC_SUBSCR'          'SAPLFDCB                                0070ADR',
+    ' '    'BDC_SUBSCR'          'SAPLFSKB                                0100ITEMS'.
+
+  IF p_zlsch = c_0 OR p_zlsch = c_hifen.
+    PERFORM z_preenche_bdc USING:
+         'X'    'SAPLSPO4'            '0300',
+         ' '    'BDC_CURSOR'          'SVALD-VALUE(01)',
+         ' '    'BDC_OKCODE'          '=FURT',
+         ' '    'SVALD-VALUE(01)'    p_codb2.
+  ENDIF.
+
+  PERFORM z_preenche_bdc USING:
+       'X'    'SAPMF05A'            '1100',
+       ' '    'BDC_OKCODE'          '/00',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0020PAGE',
+       ' '    'BDC_CURSOR'          'INVFO-ZFBDT',
+       ' '    'INVFO-ZFBDT'         vl_venc,
+       ' '    'INVFO-ZTERM'         'VCTO',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0070ADR',
+       ' '    'BDC_SUBSCR'          'SAPLFSKB                                0100ITEMS'.
+
+  IF p_zlsch = c_0 OR p_zlsch = c_hifen.
+    PERFORM z_preenche_bdc USING:
+         'X'    'SAPLSPO4'            '0300',
+         ' '    'BDC_CURSOR'          'SVALD-VALUE(01)',
+         ' '    'BDC_OKCODE'          '=FURT',
+         ' '    'SVALD-VALUE(01)'    p_codb2.
+  ENDIF.
+
+  PERFORM z_preenche_bdc USING:
+       'X'    'SAPMF05A'            '1100',
+       ' '    'BDC_OKCODE'          '/00',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0020PAGE',
+       ' '    'BDC_CURSOR'          'INVFO-ZFBDT',
+       ' '    'INVFO-ZFBDT'         vl_venc,
+       ' '    'INVFO-ZTERM'         'VCTO',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0070ADR',
+       ' '    'BDC_SUBSCR'          'SAPLFSKB                                0100ITEMS'.
+
+  IF p_zlsch = c_0 OR p_zlsch = c_hifen.
+    PERFORM z_preenche_bdc USING:
+         'X'    'SAPLSPO4'            '0300',
+         ' '    'BDC_CURSOR'          'SVALD-VALUE(01)',
+         ' '    'BDC_OKCODE'          '=FURT',
+         ' '    'SVALD-VALUE(01)'    p_codb2.
+  ENDIF.
+
+  PERFORM z_preenche_bdc USING:
+       'X'    'SAPMF05A'            '1100',
+       ' '    'BDC_OKCODE'          '=BU',
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0020PAGE',
+       ' '    'BDC_CURSOR'          'INVFO-ZLSCH',
+*       ' '    'INVFO-ZTERM'        'VCTO'      "??????
+*       ' '    'INVFO-ZBD1T'        6    "??????
+       ' '    'INVFO-ZLSCH'	        p_zlsch,
+*       ' '    'INVFO-ZLSPR'  W
+       ' '    'BDC_CURSOR'         'INVFO-ZFBDT',
+       ' '    'INVFO-ZFBDT'         vl_venc,
+       ' '    'BDC_SUBSCR'          'SAPLFDCB                                0070ADR',
+       ' '    'BDC_SUBSCR'          'SAPLFSKB                                0100ITEMS',
+       'X'    'SAPLSPO4'            '0300',
+       ' '    'BDC_CURSOR'          'SVALD-VALUE(01)',
+       ' '    'BDC_OKCODE'          '=FURT'.
+
+  CALL TRANSACTION 'FB60' USING tg_bdcdata
+                    MODE  vg_mode
+                    UPDATE vg_s
+                    MESSAGES INTO tg_msg.
+
+  CLEAR:vg_706_belnr,
+        vg_706_comp,
+        vg_706_gjahr.
+
+  DATA:l_msg         TYPE char200.
+  LOOP AT tg_msg INTO wg_msg.
+
+    IF wg_msg-msgnr = c_298 OR wg_msg-msgnr = c_055.
+      CONTINUE.
+    ENDIF.
+
+    vg_msgno = wg_msg-msgnr.
+
+    IF vg_msgno = c_312 AND wg_msg-msgtyp = c_s.
+      vg_706_belnr   = wg_msg-msgv1.
+      vg_706_comp    = wg_msg-msgv2.
+      vg_706_gjahr   = sy-datum(4).
+      wg_final-belnr = vg_706_belnr.
+    ENDIF.
+
+    CLEAR l_msg.
+    CALL FUNCTION 'MESSAGE_TEXT_BUILD'
+      EXPORTING
+        msgid               = wg_msg-msgid
+        msgnr               = wg_msg-msgnr
+        msgv1               = wg_msg-msgv1
+        msgv2               = wg_msg-msgv2
+        msgv3               = wg_msg-msgv3
+        msgv4               = wg_msg-msgv4
+      IMPORTING
+        message_text_output = l_msg
+      EXCEPTIONS
+        not_found           = 1
+        OTHERS              = 2.
+    IF wg_msg-msgtyp = c_w OR wg_msg-msgtyp = c_i.
+      wg_final-msgtyp = c_aviso.
+      CONTINUE.
+    ENDIF.
+
+    IF wg_msg-msgtyp = c_e.
+*      vg_error = abap_true.
+      wg_final-msgtyp = c_erro.
+    ENDIF.
+
+    IF wg_msg-msgtyp = c_s.
+      wg_final-msgtyp = c_ok.
+    ENDIF.
+
+    wg_final-message = l_msg.
+
+    APPEND wg_final TO tg_final.
+
+  ENDLOOP.
+
+*Retira bloqueio W
+  IF p_debau2 IS NOT INITIAL.
+    PERFORM retira_bloqueio_w.
+  ENDIF.
+
+*Adiciona chv ref 3
+  IF p_debito IS NOT INITIAL.
+    IF vg_blart = c_l6.
+      PERFORM adiciona_chv_ref3 USING p_debito.
+    ENDIF.
+  ENDIF.
+
+*Atualiza Barcode
+  IF vg_706_belnr IS NOT INITIAL.
+    vg_barcode = strlen( p_codb2 ).
+    IF vg_barcode > c_barcode.
+      PERFORM atualiza_barcode2.
+    ENDIF.
+  ENDIF.
+
+  LOOP AT tg_final ASSIGNING <fl_final>.
+    <fl_final>-belnr =  vg_706_belnr.
+    <fl_final>-bukrs =  vg_706_comp.
+    <fl_final>-gjahr =  vg_706_gjahr.
+  ENDLOOP.
+
+ENDFORM.                    " MAPEAMENTO_OUTROS
+*&---------------------------------------------------------------------*
+*&      Form  GERA_PROTOCOLO
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM gera_protocolo .
+
+  FIELD-SYMBOLS: <fs_nf3e>  TYPE ztbmm949_nf3e.
+
+  DATA: vl_nome1 TYPE string,
+        vl_nome2 TYPE string.
+
+  CLEAR: wg_tb_ztbmm706.
+
+  CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+    EXPORTING
+      input  = p_notafi
+    IMPORTING
+      output = p_notafi.
+
+  CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+    EXPORTING
+      input  = p_numfat
+    IMPORTING
+      output = p_numfat.
+
+*  --Gera número de protocolo
+  CALL FUNCTION 'NUMBER_GET_NEXT'
+    EXPORTING
+      nr_range_nr             = '01'
+      object                  = 'Z_PROT_NF'
+    IMPORTING
+      number                  = wg_tb_ztbmm706-protocolo
+    EXCEPTIONS
+      interval_not_found      = 1
+      number_range_not_intern = 2
+      object_not_found        = 3
+      quantity_is_0           = 4
+      quantity_is_not_1       = 5
+      interval_overflow       = 6
+      buffer_overflow         = 7
+      OTHERS                  = 8.
+  IF sy-subrc IS INITIAL.
+    wg_tb_ztbmm706-mandt    = sy-mandt.
+    wg_tb_ztbmm706-zdtprot  = sy-datum.
+    wg_tb_ztbmm706-zdtprot1 = sy-datum.
+    wg_tb_ztbmm706-zdtprot3 = sy-datum.
+    wg_tb_ztbmm706-zctgop   = '2'.
+    wg_tb_ztbmm706-docnum   = vg_706_docnum.
+    wg_tb_ztbmm706-belnr    = vg_706_belnr.
+    wg_tb_ztbmm706-gjahr    = sy-datum(04).
+    wg_tb_ztbmm706-znfnum   = p_numfat.
+    wg_tb_ztbmm706-znfser   = p_serie2.
+    wg_tb_ztbmm706-zdtnf    = p_dtemis.
+    wg_tb_ztbmm706-ztpprot  = '116'.
+    wg_tb_ztbmm706-zstfor         = '35'. "Finalizado
+    wg_tb_ztbmm706-zetpapa        = '55'.
+    "Entrada Fiscal/Financeira Efetuada
+    wg_tb_ztbmm706-zstint         = '55'.
+    "Entrada Fiscal/Financeira Efetuada ICON_PAYMENT
+    wg_tb_ztbmm706-zstaprvh       = 'L'.  "Liberado
+    wg_tb_ztbmm706-zstdigt        = '6'.  "Aguardando digitalização
+    wg_tb_ztbmm706-zconc          = 'X'.
+    wg_tb_ztbmm706-comp_code      = p_bukrs.
+    wg_tb_ztbmm706-vendor         = p_conce.
+    wg_tb_ztbmm706-tot_vl_liq_uni = p_valtot.
+    wg_tb_ztbmm706-vl_sem_infl    = p_valtot.
+    wg_tb_ztbmm706-currency       = 'BRL'.
+    wg_tb_ztbmm706-plant          = p_bupla.
+    wg_tb_ztbmm706-zdebaut        = p_codbeb.
+    READ TABLE tg_list INTO wg_list WITH KEY key = p_tpdesp.
+    IF sy-subrc = 0.
+      wg_tb_ztbmm706-site           = wg_list-text.
+    ENDIF.
+
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+      EXPORTING
+        input  = wg_tb_ztbmm706-zdebaut
+      IMPORTING
+        output = wg_tb_ztbmm706-zdebaut.
+
+    wg_tb_ztbmm706-criacao_user = sy-uname.
+    wg_tb_ztbmm706-criacao_data = sy-datum.
+    wg_tb_ztbmm706-criacao_hora = sy-uzeit.
+    wg_tb_ztbmm706-dtvenc       = p_dtvenc.
+    wg_tb_ztbmm706-cod_contaee  = p_uc.
+
+    IF p_chave IS NOT INITIAL. "AND NOT p_file IS INITIAL.
+*----------------------------------------------------------------------
+**********NÃO TENHO P_FILE**********
+*      vl_nome2 = p_file.
+*
+*      DO.
+*
+*        IF vg_tipo EQ 'LOCAL'.
+*          SPLIT vl_nome2 AT '\' INTO vl_nome1 vl_nome2.
+*        ELSEIF vg_tipo EQ 'SERVER'.
+*          SPLIT vl_nome2 AT '/' INTO vl_nome1 vl_nome2.
+*        ENDIF.
+*
+*        IF vl_nome2 IS INITIAL.
+*          EXIT.
+*        ENDIF.
+*      ENDDO.
+*---------------------------------------------------------------------
+*      wg_tb_ztbmm706-zxml     = p_chave. "Chave de acesso XML
+*      wg_tb_ztbmm706-stat_xml = 'A'.      "Aguardando validação entre XML e protocolo
+*
+*      IF NOT p_chave IS INITIAL.
+*
+*        READ TABLE tl_nf3e_c ASSIGNING <fs_nf3e> INDEX 1.
+*
+*        IF sy-subrc IS INITIAL.
+*
+*          IF <fs_nf3e>-id NE p_chave.
+*            MESSAGE e000 WITH text-m15.
+*          ELSE.
+*
+*            <fs_nf3e>-arq_nome   = vl_nome1.
+*            <fs_nf3e>-arq_dtup   = sy-datum.
+*            <fs_nf3e>-arq_dtup_h = v_arq_arq_dtup_h.
+*
+*            MODIFY ztbmm949_nf3e FROM TABLE tl_nf3e_c.
+*            IF NOT tl_nf3e_i IS INITIAL.
+*              MODIFY ztbmm949_nf3e_i FROM TABLE tl_nf3e_i.
+*            ENDIF.
+*            IF NOT tl_nf3e_h IS INITIAL.
+*              MODIFY ztbmm949_nf3e_h FROM TABLE tl_nf3e_h.
+*            ENDIF.
+*
+*          ENDIF.
+*        ENDIF.
+    ENDIF.
+*
+*      IF NOT v_706_belnr  IS INITIAL AND
+*         NOT v_706_docnum IS INITIAL.
+*        PERFORM f_grava_xml USING vl_nome1 ' '.
+*      ENDIF.
+    EXPORT protocolo FROM wg_tb_ztbmm706-protocolo
+             TO MEMORY ID 'PROTOCOLO_NF3E'.
+*
+*    ENDIF.
+*
+    MODIFY ztbmm706 FROM wg_tb_ztbmm706.
+
+    LOOP AT tg_final ASSIGNING <fl_final>.
+      <fl_final>-protocolo = wg_tb_ztbmm706-protocolo.
+    ENDLOOP.
+*    PERFORM f_grava_dados.
+*
+    COMMIT WORK.
+  ENDIF.
+
+ENDFORM.                    " GERA_PROTOCOLO
+*&---------------------------------------------------------------------*
+*&      Form  CARREGA_FORMA_PAGAMENTO
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM carrega_forma_pagamento .
+
+*  IF p_codb IS NOT INITIAL.
+*    CLEAR:vg_706_bankl,vg_706_barra.
+*
+*    vg_706_barra = p_codb(3).
+*
+*    SELECT SINGLE bankl
+*             INTO vg_706_bankl
+*             FROM bnka
+*            WHERE banks EQ c_pais
+*              AND bankl EQ vg_706_barra
+*              AND loevm = ' '.
+*    IF sy-subrc = 0.
+*      p_frmpg = c_r.
+*    ELSE.
+*      p_frmpg = c_0.
+*    ENDIF.
+*  ENDIF.
+
+ENDFORM.                    " CARREGA_FORMA_PAGAMENTO
+*&---------------------------------------------------------------------*
+*&      Form  CARREGA_FORMA_PAGAMENTO_OUTROS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM carrega_forma_pagamento_outros .
+
+*  IF p_codb2 IS NOT INITIAL.
+*    CLEAR:vg_706_bankl,vg_706_barra.
+*
+*    vg_706_barra = p_codb2(3).
+*
+*    SELECT SINGLE bankl
+*             INTO vg_706_bankl
+*             FROM bnka
+*            WHERE banks EQ c_pais
+*              AND bankl EQ vg_706_barra
+*              AND loevm = ' '.
+*    IF sy-subrc = 0.
+*      p_zlsch = c_r.
+*    ELSE.
+*      p_zlsch = c_0.
+*    ENDIF.
+*  ENDIF.
+
+ENDFORM.                    " CARREGA_FORMA_PAGAMENTO_OUTROS
+*&---------------------------------------------------------------------*
+*&      Form  ATUALIZA_BARCODE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM atualiza_barcode .
+
+  DATA: vl_pcodbar TYPE barcode.
+  SELECT SINGLE buzei
+         INTO vg_706_buzei
+         FROM bsik
+        WHERE belnr EQ vg_706_belnr
+          AND bukrs EQ vg_706_comp
+          AND gjahr EQ vg_706_gjahr.
+
+  IF vg_barcode EQ '48'.
+    vg_barcode44 = p_codb.
+    CONCATENATE:
+      p_codb(11)    p_codb+12(11)
+      p_codb+24(11) p_codb+36(11) INTO vl_pcodbar IN CHARACTER MODE.
+  ENDIF.
+
+  ztbfi144-belnr     = vg_706_belnr.
+  ztbfi144-bukrs     = vg_706_comp.
+  ztbfi144-gjahr     = vg_706_gjahr.
+  ztbfi144-buzei     = vg_706_buzei.
+  ztbfi144-barcode   = vl_pcodbar.
+  ztbfi144-barcode44 = vg_barcode44.
+  IF ztbfi144-belnr IS NOT INITIAL.
+    INSERT ztbfi144.
+  ENDIF.
+
+ENDFORM.                    " ATUALIZA_BARCODE
+*&---------------------------------------------------------------------*
+*&      Form  ATUALIZA_BARCODE2
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM atualiza_barcode2 .
+
+  DATA: vl_pcodbar TYPE barcode.
+  SELECT SINGLE buzei
+         INTO vg_706_buzei
+         FROM bsik
+        WHERE belnr EQ vg_706_belnr
+          AND bukrs EQ vg_706_comp
+          AND gjahr EQ vg_706_gjahr.
+
+  IF vg_barcode EQ '48'.
+    vg_barcode44 = p_codb2.
+    CONCATENATE:
+      p_codb2(11)    p_codb2+12(11)
+      p_codb2+24(11) p_codb2+36(11) INTO vl_pcodbar IN CHARACTER MODE.
+  ENDIF.
+
+  ztbfi144-belnr     = vg_706_belnr.
+  ztbfi144-bukrs     = vg_706_comp.
+  ztbfi144-gjahr     = vg_706_gjahr.
+  ztbfi144-buzei     = vg_706_buzei.
+  ztbfi144-barcode   = vl_pcodbar.
+  ztbfi144-barcode44 = vg_barcode44.
+  IF ztbfi144-belnr IS NOT INITIAL.
+    INSERT ztbfi144.
+  ENDIF.
+
+ENDFORM.                    " ATUALIZA_BARCODE2
+*&---------------------------------------------------------------------*
+*&      Form  GERA_PROTOCOLO_OUTROS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM gera_protocolo_outros .
+  FIELD-SYMBOLS: <fs_nf3e>  TYPE ztbmm949_nf3e.
+
+  CLEAR: wg_tb_ztbmm706.
+
+  CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+    EXPORTING
+      input  = p_xblnr
+    IMPORTING
+      output = p_xblnr.
+
+  CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+    EXPORTING
+      input  = p_nfnum
+    IMPORTING
+      output = p_nfnum.
+
+*  --Gera número de protocolo
+  CALL FUNCTION 'NUMBER_GET_NEXT'
+    EXPORTING
+      nr_range_nr             = '01'
+      object                  = 'Z_PROT_NF'
+    IMPORTING
+      number                  = wg_tb_ztbmm706-protocolo
+    EXCEPTIONS
+      interval_not_found      = 1
+      number_range_not_intern = 2
+      object_not_found        = 3
+      quantity_is_0           = 4
+      quantity_is_not_1       = 5
+      interval_overflow       = 6
+      buffer_overflow         = 7
+      OTHERS                  = 8.
+  IF sy-subrc IS INITIAL.
+    wg_tb_ztbmm706-mandt    = sy-mandt.
+    wg_tb_ztbmm706-zdtprot  = sy-datum.
+    wg_tb_ztbmm706-zdtprot1 = sy-datum.
+    wg_tb_ztbmm706-zdtprot3 = sy-datum.
+    wg_tb_ztbmm706-zctgop   = '2'.
+    wg_tb_ztbmm706-docnum   = vg_706_docnum.
+    wg_tb_ztbmm706-belnr    = vg_706_belnr.
+    wg_tb_ztbmm706-gjahr    = sy-datum(04).
+    wg_tb_ztbmm706-znfnum   = p_nfnum.
+    wg_tb_ztbmm706-znfser   = p_series.
+    wg_tb_ztbmm706-zdtnf    = p_bldat2.
+    wg_tb_ztbmm706-ztpprot  = '116'.
+    wg_tb_ztbmm706-zstfor         = '35'. "Finalizado
+    wg_tb_ztbmm706-zetpapa        = '55'.
+    "Entrada Fiscal/Financeira Efetuada
+    wg_tb_ztbmm706-zstint         = '55'.
+    "Entrada Fiscal/Financeira Efetuada ICON_PAYMENT
+    wg_tb_ztbmm706-zstaprvh       = 'L'.  "Liberado
+    wg_tb_ztbmm706-zstdigt        = '6'.  "Aguardando digitalização
+    wg_tb_ztbmm706-zconc          = 'X'.
+    wg_tb_ztbmm706-comp_code      = p_bukrs2.
+    wg_tb_ztbmm706-vendor         = p_lifnr2.
+    wg_tb_ztbmm706-tot_vl_liq_uni = p_wrbtr.
+    wg_tb_ztbmm706-vl_sem_infl    = p_wrbtr.
+    wg_tb_ztbmm706-currency       = 'BRL'.
+    wg_tb_ztbmm706-plant          = p_bupla2.
+    wg_tb_ztbmm706-zdebaut        = p_codb2.
+    READ TABLE tg_list INTO wg_list WITH KEY key = p_tpdesp.
+    IF sy-subrc = 0.
+      wg_tb_ztbmm706-site           = wg_list-text.
+    ENDIF.
+
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+      EXPORTING
+        input  = wg_tb_ztbmm706-zdebaut
+      IMPORTING
+        output = wg_tb_ztbmm706-zdebaut.
+
+    wg_tb_ztbmm706-criacao_user = sy-uname.
+    wg_tb_ztbmm706-criacao_data = sy-datum.
+    wg_tb_ztbmm706-criacao_hora = sy-uzeit.
+    wg_tb_ztbmm706-dtvenc       = p_zfbdt.
+    wg_tb_ztbmm706-cod_contaee  = p_uct.
+
+    IF p_chave IS NOT INITIAL. "AND NOT p_file IS INITIAL.
+*----------------------------------------------------------------------
+**********NÃO TENHO P_FILE**********
+*      vl_nome2 = p_file.
+*
+*      DO.
+*
+*        IF vg_tipo EQ 'LOCAL'.
+*          SPLIT vl_nome2 AT '\' INTO vl_nome1 vl_nome2.
+*        ELSEIF vg_tipo EQ 'SERVER'.
+*          SPLIT vl_nome2 AT '/' INTO vl_nome1 vl_nome2.
+*        ENDIF.
+*
+*        IF vl_nome2 IS INITIAL.
+*          EXIT.
+*        ENDIF.
+*      ENDDO.
+*---------------------------------------------------------------------
+      wg_tb_ztbmm706-zxml     = p_chave. "Chave de acesso XML
+      wg_tb_ztbmm706-stat_xml = 'A'.      "Aguardando validação entre XML e protocolo
+*
+*      IF NOT p_chave IS INITIAL.
+*
+*        READ TABLE tl_nf3e_c ASSIGNING <fs_nf3e> INDEX 1.
+*
+*        IF sy-subrc IS INITIAL.
+*
+*          IF <fs_nf3e>-id NE p_chave.
+*            MESSAGE e000 WITH text-m15.
+*          ELSE.
+*
+*            <fs_nf3e>-arq_nome   = vl_nome1.
+*            <fs_nf3e>-arq_dtup   = sy-datum.
+*            <fs_nf3e>-arq_dtup_h = v_arq_arq_dtup_h.
+*
+*            MODIFY ztbmm949_nf3e FROM TABLE tl_nf3e_c.
+*            IF NOT tl_nf3e_i IS INITIAL.
+*              MODIFY ztbmm949_nf3e_i FROM TABLE tl_nf3e_i.
+*            ENDIF.
+*            IF NOT tl_nf3e_h IS INITIAL.
+*              MODIFY ztbmm949_nf3e_h FROM TABLE tl_nf3e_h.
+*            ENDIF.
+*
+*          ENDIF.
+*        ENDIF.
+    ENDIF.
+*
+*      IF NOT v_706_belnr  IS INITIAL AND
+*         NOT v_706_docnum IS INITIAL.
+*        PERFORM f_grava_xml USING vl_nome1 ' '.
+*      ENDIF.
+    EXPORT protocolo FROM wg_tb_ztbmm706-protocolo
+             TO MEMORY ID 'PROTOCOLO_NF3E'.
+*
+*    ENDIF.
+*
+    MODIFY ztbmm706 FROM wg_tb_ztbmm706.
+
+    LOOP AT tg_final ASSIGNING <fl_final>.
+      <fl_final>-protocolo = wg_tb_ztbmm706-protocolo.
+    ENDLOOP.
+
+*    PERFORM f_grava_dados.
+*
+    COMMIT WORK.
+  ENDIF.
+
+ENDFORM.                    " GERA_PROTOCOLO_OUTROS
+*&---------------------------------------------------------------------*
+*&      Form  GET_CONTA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      -->P_P_KOSTL  text
+*----------------------------------------------------------------------*
+FORM get_conta  USING    p_p_kostl.
+  DATA:vl_kosar TYPE csks-kosar.
+
+  PERFORM carrega_contas.
+  IF vg_not_found IS INITIAL.
+
+    CLEAR vg_conta.
+
+    SELECT SINGLE kosar
+             FROM csks
+             INTO vl_kosar
+             WHERE kokrs  = c_br01
+               AND kostl  = p_p_kostl
+               AND datbi >= c_19000101
+               AND datab <= c_99991231.
+    IF sy-subrc = 0.
+      CASE vl_kosar.
+        WHEN c_g.
+          vg_conta = vg_g.
+        WHEN c_c.
+          vg_conta = vg_c.
+        WHEN c_a.
+          vg_conta = vg_a.
+        WHEN c_o.
+          vg_conta = vg_o.
+      ENDCASE.
+    ELSE.
+      MESSAGE i000(zb) WITH text-068 DISPLAY LIKE c_e.
+      LEAVE LIST-PROCESSING.
+    ENDIF.
+
+  ENDIF.
+ENDFORM.                    " GET_CONTA
+*&---------------------------------------------------------------------*
+*&      Form  RETIRA_BLOQUEIO_W
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM retira_bloqueio_w .
+  DATA:wl_bseg  TYPE bseg,
+       v_tcode  TYPE tcode VALUE 'ZT500',
+       v_cprog  TYPE sy-cprog.
+
+  CLEAR:tg_buztab[],tg_fldtab[].
+
+  SELECT SINGLE *
+                FROM bseg
+                INTO wl_bseg
+               WHERE belnr = vg_706_belnr
+                 AND bukrs = vg_706_comp
+                 AND gjahr = vg_706_gjahr
+                 AND koart = c_k.
+  IF sy-subrc = 0 AND wl_bseg-zlspr = c_w.
+
+    APPEND INITIAL LINE TO tg_buztab ASSIGNING <fs_buztab>.
+
+    MOVE-CORRESPONDING: wl_bseg TO <fs_buztab>.
+    CLEAR wl_bseg-zlspr.
+
+    wg_fldtab-fname = c_zlspr.
+    APPEND wg_fldtab TO tg_fldtab.
+
+    IF tg_buztab[] IS NOT INITIAL.
+      v_cprog = sy-cprog.
+      EXPORT v_cprog TO MEMORY ID 'ZTFI838'.
+      EXPORT v_tcode TO MEMORY ID 'ZT500_CD'.
+      CALL FUNCTION 'FI_ITEMS_MASS_CHANGE'
+        EXPORTING
+          s_bseg     = wl_bseg
+        IMPORTING
+          errtab     = tg_erros
+        TABLES
+          it_buztab  = tg_buztab
+          it_fldtab  = tg_fldtab
+        EXCEPTIONS
+          bdc_errors = 1
+          OTHERS     = 2.
+
+      COMMIT WORK.
+    ENDIF.
+
+  ENDIF.
+
+ENDFORM.                    " RETIRA_BLOQUEIO_W
+*&---------------------------------------------------------------------*
+*&      Form  ADICIONA_CHV_REF3
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM adiciona_chv_ref3 USING p_p_coddeb.
+  DATA:wl_bseg TYPE bseg,
+       vl_ok   TYPE abap_bool,
+       l_msg   TYPE char200.
+
+  CLEAR:tg_buztab[],tg_fldtab[].
+
+  SELECT SINGLE *
+                FROM bseg
+                INTO wl_bseg
+               WHERE belnr = vg_706_belnr
+                 AND bukrs = vg_706_comp
+                 AND gjahr = vg_706_gjahr
+                 AND koart = c_k.
+  IF sy-subrc = 0.
+
+    APPEND INITIAL LINE TO tg_buztab ASSIGNING <fs_buztab>.
+
+    MOVE-CORRESPONDING: wl_bseg TO <fs_buztab>.
+    wl_bseg-xref3 = p_p_coddeb.
+
+    wg_fldtab-fname = c_xref3.
+    APPEND wg_fldtab TO tg_fldtab.
+
+    IF tg_buztab[] IS NOT INITIAL.
+      DO 10 TIMES.
+        CALL FUNCTION 'FI_ITEMS_MASS_CHANGE'
+          EXPORTING
+            s_bseg     = wl_bseg
+          IMPORTING
+            errtab     = tg_erros
+          TABLES
+            it_buztab  = tg_buztab
+            it_fldtab  = tg_fldtab
+          EXCEPTIONS
+            bdc_errors = 1
+            OTHERS     = 2.
+
+        IF sy-subrc = 0.
+          vl_ok = abap_true.
+          EXIT.
+        ENDIF.
+        COMMIT WORK AND WAIT.
+      ENDDO.
+
+      COMMIT WORK AND WAIT.
+
+      IF vl_ok IS INITIAL.
+        READ TABLE tg_erros INTO wg_erros INDEX 1.
+        IF sy-subrc = 0.
+          CLEAR l_msg.
+          CALL FUNCTION 'MESSAGE_TEXT_BUILD'
+            EXPORTING
+              msgid               = wg_erros-err-msgid
+              msgnr               = wg_erros-err-msgnr
+              msgv1               = wg_erros-err-msgv1
+              msgv2               = wg_erros-err-msgv2
+              msgv3               = wg_erros-err-msgv3
+              msgv4               = wg_erros-err-msgv4
+            IMPORTING
+              message_text_output = l_msg
+            EXCEPTIONS
+              not_found           = 1
+              OTHERS              = 2.
+          IF sy-subrc = 0 .
+            CONCATENATE c_xref3 l_msg INTO wg_final-message
+            SEPARATED BY '-'.
+            APPEND wg_final TO tg_final.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+
+  ENDIF.
+
+ENDFORM.                    " ADICIONA_CHV_REF3
+*&---------------------------------------------------------------------*
+*&      Form  SOMA_VAL_TOT
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM soma_val_tot .
+  DATA:vl_val     TYPE p DECIMALS 4,
+       tl_dado    TYPE TABLE OF string,
+       wl_dado    LIKE LINE OF tl_dado,
+       vl_lines   TYPE i,
+       vl_aux     TYPE string,
+       vl_cent(4) TYPE c.
+
+  p_valtot = p_agua + p_esgoto + p_juros + p_multa + p_outros.
+
+  vl_val = p_basec * p_aliq.
+  IF vl_val > 0.
+    vl_val = vl_val / 100.
+  ENDIF.
+
+  vl_aux = vl_val.
+  SPLIT vl_aux AT '.' INTO TABLE tl_dado.
+  DESCRIBE TABLE tl_dado LINES vl_lines.
+  IF vl_lines > 0.
+    READ TABLE tl_dado INTO wl_dado INDEX vl_lines.
+    IF sy-subrc = 0.
+      vl_cent = wl_dado.
+    ENDIF.
+  ENDIF.
+
+  IF vl_cent+2(1) > 5 .
+    CALL FUNCTION 'ROUND'
+      EXPORTING
+        decimals      = 2
+        input         = vl_val
+        sign          = '+'
+      IMPORTING
+        output        = p_valor
+      EXCEPTIONS
+        input_invalid = 1
+        overflow      = 2
+        type_invalid  = 3
+        OTHERS        = 4.
+    IF sy-subrc <> 0.
+* Implement suitable error handling here
+    ENDIF.
+  ELSE.
+    p_valor = vl_val.
+  ENDIF.
+
+ENDFORM.                    " SOMA_VAL_TOT
+*&---------------------------------------------------------------------*
+*&      Form  SOMA_VAL_TOT_OUTROS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM soma_val_tot_outros .
+  DATA:vl_val     TYPE p DECIMALS 4,
+       tl_dado    TYPE TABLE OF string,
+       wl_dado    LIKE LINE OF tl_dado,
+       vl_lines   TYPE i,
+       vl_aux     TYPE string,
+       vl_cent(4) TYPE c.
+
+  p_wrbtr = s_juro + s_multa + p_totnf2.
+
+*  p_taxval = p_base * p_rate.
+*  IF p_taxval > 0.
+*    p_taxval = p_taxval / 100.
+*  ENDIF.
+
+  vl_val = p_base * p_rate.
+  IF vl_val > 0.
+    vl_val = vl_val / 100.
+  ENDIF.
+
+  vl_aux = vl_val.
+  SPLIT vl_aux AT '.' INTO TABLE tl_dado.
+  DESCRIBE TABLE tl_dado LINES vl_lines.
+  IF vl_lines > 0.
+    READ TABLE tl_dado INTO wl_dado INDEX vl_lines.
+    IF sy-subrc = 0.
+      vl_cent = wl_dado.
+    ENDIF.
+  ENDIF.
+
+  IF vl_cent+2(1) > 5 .
+    CALL FUNCTION 'ROUND'
+      EXPORTING
+        decimals      = 2
+        input         = vl_val
+        sign          = '+'
+      IMPORTING
+        output        = p_taxval
+      EXCEPTIONS
+        input_invalid = 1
+        overflow      = 2
+        type_invalid  = 3
+        OTHERS        = 4.
+    IF sy-subrc <> 0.
+* Implement suitable error handling here
+    ENDIF.
+  ELSE.
+    p_taxval = vl_val.
+  ENDIF.
+
+ENDFORM.                    " SOMA_VAL_TOT_OUTROS
+*&---------------------------------------------------------------------*
+*&      Form  BUSCA_7000
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM busca_7000 .
+
+  DATA:wl_tvarvc TYPE tvarvc.
+  SELECT SINGLE * FROM tvarvc INTO wl_tvarvc WHERE name LIKE c_z_ztfi838_multa_4ul.
+  IF wl_tvarvc-low IS NOT INITIAL.
+    vg_7000 = wl_tvarvc-low.
+  ELSE.
+    MESSAGE e000(zb) WITH text-069.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+
+ENDFORM.                    " BUSCA_7000
+*&---------------------------------------------------------------------*
+*&      Form  user_command
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      -->R_UCOMM      text
+*      -->RS_SELFIELD  text
+*----------------------------------------------------------------------*
+FORM user_command USING r_ucomm TYPE sy-ucomm               "#EC CALLED
+                        rs_selfield TYPE slis_selfield.
+
+  DATA:wl_final LIKE LINE OF tg_final.
+
+  CASE r_ucomm.
+    WHEN c_ic1.
+      IF rs_selfield-fieldname = c_belnr.
+        READ TABLE tg_final INTO wl_final INDEX rs_selfield-tabindex.
+        IF sy-subrc = 0.
+          SET PARAMETER ID 'BLN' FIELD wl_final-belnr.
+
+          SET PARAMETER ID 'BUK' FIELD wl_final-bukrs.
+
+          SET PARAMETER ID 'GJR' FIELD wl_final-gjahr.
+
+* Calling Tcode FB03
+          CALL TRANSACTION 'FB03' AND SKIP FIRST SCREEN. " 'FB03'.
+        ENDIF.
+      ENDIF.
+  ENDCASE.
+
+ENDFORM. "user_command
+*&---------------------------------------------------------------------*
+*&      Form  CARREGA_CONTAS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM carrega_contas .
+  DATA:tl_tvarvc       TYPE TABLE OF tvarvc,
+       wl_tvarvc       TYPE tvarvc,
+       vl_name         TYPE rvari_vnam,
+       wl_list         LIKE LINE OF tg_list,
+       vl_tipo_desp(8) TYPE c.
+
+  CLEAR :vg_a,vg_c,vg_g,vg_o.
+  READ TABLE tg_list INTO wl_list WITH KEY key = p_tpdesp.
+  IF sy-subrc = 0.
+    vl_tipo_desp = wl_list-text.
+  ENDIF.
+
+  CONCATENATE c_z_ztfi838 vl_tipo_desp INTO vl_name.
+  SELECT * FROM tvarvc INTO TABLE tl_tvarvc WHERE name LIKE vl_name.
+  IF sy-subrc = 0.
+    LOOP AT tl_tvarvc INTO wl_tvarvc.
+      CASE wl_tvarvc-low(3).
+
+        WHEN c_csp.
+          vg_g = wl_tvarvc-low+4(10).
+        WHEN c_dco.
+          vg_c = wl_tvarvc-low+4(10).
+        WHEN c_dga.
+          vg_a = wl_tvarvc-low+4(10).
+        WHEN c_dop.
+          vg_o = wl_tvarvc-low+4(10).
+      ENDCASE.
+    ENDLOOP.
+
+  ELSE.
+    vg_not_found = abap_true.
+    MESSAGE i000(zb) WITH text-070 vl_name DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+
+
+ENDFORM.                    " CARREGA_CONTAS
+*&---------------------------------------------------------------------*
+*&      Form  GET_CONTA_OUTROS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      -->P_P_KOSTL  text
+*----------------------------------------------------------------------*
+FORM get_conta_outros  USING    p_p_kostl.
+  DATA:vl_kosar TYPE csks-kosar.
+
+  PERFORM carrega_contas_outros.
+  IF vg_not_found IS INITIAL.
+
+    CLEAR vg_conta.
+
+    SELECT SINGLE kosar
+             FROM csks
+             INTO vl_kosar
+             WHERE kokrs  = c_br01
+               AND kostl  = p_p_kostl
+               AND datbi >= c_19000101
+               AND datab <= c_99991231.
+    IF sy-subrc = 0.
+      CASE vl_kosar.
+        WHEN c_g.
+          vg_conta_outros = vg_g.
+        WHEN c_c.
+          vg_conta_outros = vg_c.
+        WHEN c_a.
+          vg_conta_outros = vg_a.
+        WHEN c_o.
+          vg_conta_outros = vg_o.
+      ENDCASE.
+    ELSE.
+      MESSAGE i000(zb) WITH text-068 DISPLAY LIKE c_e.
+      LEAVE LIST-PROCESSING.
+    ENDIF.
+
+  ENDIF.
+ENDFORM.                    " GET_CONTA_OUTROS
+*&---------------------------------------------------------------------*
+*&      Form  CARREGA_CONTAS_OUTROS
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM carrega_contas_outros .
+  DATA:tl_tvarvc       TYPE TABLE OF tvarvc,
+       wl_tvarvc       TYPE tvarvc,
+       wl_list         LIKE LINE OF tg_list,
+       vl_tipo_desp(8) TYPE c.
+
+  CLEAR :vg_a,vg_c,vg_g,vg_o.
+
+  SELECT * FROM tvarvc INTO TABLE tl_tvarvc WHERE name LIKE c_z_ztfi838_outros.
+  IF sy-subrc = 0.
+    LOOP AT tl_tvarvc INTO wl_tvarvc.
+      CASE wl_tvarvc-low(3).
+
+        WHEN c_csp.
+          vg_g = wl_tvarvc-low+4(10).
+        WHEN c_dco.
+          vg_c = wl_tvarvc-low+4(10).
+        WHEN c_dga.
+          vg_a = wl_tvarvc-low+4(10).
+        WHEN c_dop.
+          vg_o = wl_tvarvc-low+4(10).
+      ENDCASE.
+    ENDLOOP.
+
+  ELSE.
+    vg_not_found = abap_true.
+    MESSAGE i000(zb) WITH text-070 c_z_ztfi838_outros DISPLAY LIKE c_e.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+
+ENDFORM.                    " CARREGA_CONTAS_OUTROS
+*&---------------------------------------------------------------------*
+*&      Form  BUSCA_KOSTL
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      <--P_VG_KOSTL_MULTA  text
+*----------------------------------------------------------------------*
+FORM busca_kostl USING p_p_kostl
+                 CHANGING p_vg_kostl_multa.
+  DATA:vl_setclass TYPE setleaf-setclass VALUE '0101',
+       vl_setname  TYPE setleaf-setname,
+       vl_valfrom  TYPE setleaf-valfrom,
+       tl_kostl    TYPE TABLE OF kostl,
+       wl_kostl    TYPE kostl.
+
+  CONCATENATE p_p_kostl(2) c_crp_mist INTO vl_setname.
+  CONDENSE vl_setname NO-GAPS.
+
+  CONCATENATE p_p_kostl(4) c_percent INTO vl_valfrom.
+  CONDENSE vl_valfrom NO-GAPS.
+
+  SELECT valfrom
+         FROM setleaf
+         INTO TABLE tl_kostl
+         WHERE setclass = vl_setclass
+           AND setname = vl_setname.
+
+  LOOP AT tl_kostl INTO wl_kostl.
+
+    IF wl_kostl(4) = p_p_kostl(4).
+      p_vg_kostl_multa = wl_kostl.
+      EXIT.
+    ENDIF.
+
+  ENDLOOP.
+
+
+ENDFORM.                    " BUSCA_KOSTL
